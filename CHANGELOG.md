@@ -20,3 +20,6 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     (open / split / focus).
   - `agentmux-claude::path` — `encode_project_path`, byte-faithful port of
     the JS reference, with unit tests.
+- `docs/background/` — imported the four 2026-05-27 analysis docs that
+  produced the restart decision (assessment, feature sizing, the Electron
+  app's architecture and NFRs) plus an index README.
