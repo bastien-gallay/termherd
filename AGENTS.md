@@ -1,0 +1,102 @@
+# AGENTS.md
+
+## What this is
+
+`termherd` is a Rust replatform of an Electron Claude Code session
+manager. The product is a **terminal workspace for Claude Code sessions** —
+browse, launch, arrange (tabs + splits), monitor, search — driven from the
+keyboard, on macOS Apple Silicon. The restart exists to fix four quality gaps
+(god-object, races, silent catches, untestable design) **by construction**.
+
+Authoritative design lives in `docs/PRD.md` and `docs/ARCHITECTURE.md`. Read
+them before any non-trivial work — the constraints below are downstream of
+them.
+
+## Commands
+
+```bash
+cargo run -p termherd-app          # run the binary (M0: tracing + single-instance stub)
+cargo test --workspace             # all tests
+cargo test -p termherd-core        # tests for one crate
+cargo test -p termherd-core workspace::tests::split_wraps_leaf  # one test by path
+
+# CI gates — mirror locally before pushing (CI runs all of these and they are blocking)
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace             # CI uses `cargo nextest run --workspace`
+cargo deny check                   # if cargo-deny installed
+
+# Markdown is also gated in CI
+markdownlint-cli2                  # uses .markdownlint-cli2.jsonc
+```
+
+Toolchain is pinned to **Rust 1.95.0 / edition 2024** via `rust-toolchain.toml`
+(Q10) — do not bump without updating the pin.
+
+## Architecture — the dependency rule
+
+Hexagonal workspace. The single most important invariant:
+
+```text
+app  ──►  core  ◄──  adapters          (adapters depend on core, never reverse)
+           │
+           ▼
+         claude   (pure codec; no I/O)
+```
+
+- `crates/core` — domain, headless `App` state machine, `Workspace` (pane tree
+  + tabs), keymap, port traits. **Depends only on `claude`.** No I/O, no
+  globals, no `unwrap`/`expect`/`panic` (these are clippy-denied here, see
+  `crates/core/Cargo.toml`).
+- `crates/claude` — pure Claude CLI format codec (path encode/derive, JSONL
+  digest, OSC decode). Same strict lint profile as `core`.
+- `crates/app` — iced GUI shell. Currently a tracing + single-instance stub;
+  M1+ will construct adapters in `main()` and inject them into `core::App`.
+- Adapters (`store`, `pty`, `scan`, optional `mcp`) do not yet exist — they
+  land per the milestone plan in `docs/ARCHITECTURE.md` §15.
+
+When adding code, ask: *which crate does this belong in?* If the answer is
+"`core` should call this adapter directly," the answer is wrong — add a port
+trait in `core::ports` and have the adapter implement it.
+
+## The headless core (where logic lives)
+
+`core::App::apply(Event) -> Vec<Effect>` is the Elm-style heart of the system
+(`crates/core/src/app.rs`). It is **pure**: no I/O, no clock, no panic. The
+GUI translates user actions into `Event`s and performs the returned
+`Effect`s. Everything testable lives behind `apply`.
+
+`Workspace` (`crates/core/src/workspace.rs`) is the tab/split pane tree — pure
+data, exhaustively unit-testable. The focus path is a `Vec<Branch>` from the
+root; mutators (`open`, `split`, …) return `Option<()>` rather than panicking
+when invariants are violated. Follow that pattern: surface broken invariants
+as `None`/`Err`, never `unwrap`.
+
+## Concurrency model (when adapters arrive)
+
+One tokio runtime, **actor-per-session**: each session is owned by a task
+holding its PTY handle and terminal grid. Other parts of the system talk to
+it only via channels. There is no shared `&mut Session`. The GUI thread owns
+`core::App` and applies events single-threaded. This is the structural fix for
+the `realSessionId` race (Q6 in `docs/PRD.md` §4) — keep it.
+
+## Quality bar — non-negotiable
+
+Each rule below is tied to a Q-row in `docs/PRD.md` §4 (the reason the rewrite
+exists). Do not relax them locally.
+
+- **`core` and `claude`**: clippy denies `unwrap_used`, `expect_used`, `panic`.
+  Tests may use them (`clippy.toml` allows it in tests). Production paths
+  return typed errors (`thiserror`).
+- **No global mutable state.** No `static mut`, no `lazy_static`, no
+  require-time singletons. Construct dependencies in `main()` and inject.
+- **One logging stack:** `tracing`. No `println!` outside tests.
+- **`unsafe_code = "deny"`** workspace-wide.
+
+## Conventions
+
+- Markdown prose: 80-col wrap (tables / code blocks exempt, see
+  `.markdownlint-cli2.jsonc`).
+- Commit messages: no "Claude" signature (per global user instruction).
+- Status of every feature is tracked in `ROADMAP.md` (MoSCoW from PRD §5).
+  Check the ticked/unticked state there before assuming something is built.
