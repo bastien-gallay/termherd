@@ -120,7 +120,27 @@ impl Shell {
             .on_press(Message::ToggleSidebar)
             .style(button::text)
             .padding(0);
-        let chrome = column![hide, search, titles_only, show_archived].spacing(8);
+        // Adding a repo sits with the sidebar's own chrome, not inside the
+        // project list: it is how the list gets a row it could not discover.
+        let add_repo = tooltip(
+            button(text(strings::SIDEBAR_ADD_REPO).size(11))
+                .on_press(Message::PickRepoFolder)
+                .style(button::text)
+                .padding(0),
+            container(text(strings::SIDEBAR_ADD_REPO_HINT).size(11))
+                .padding(6)
+                .style(container::rounded_box),
+            tooltip::Position::Bottom,
+        );
+        let chrome = column![
+            row![hide, iced::widget::Space::new().width(Fill), add_repo]
+                .spacing(6)
+                .align_y(iced::Center),
+            search,
+            titles_only,
+            show_archived
+        ]
+        .spacing(8);
         container(chrome.push(scrollable(list).height(Fill)).padding(8))
             .width(300)
             .style(container::rounded_box)
@@ -236,12 +256,21 @@ impl Shell {
         live: &HashMap<&str, SessionStatus>,
         now: SystemTime,
     ) -> Element<'_, Message> {
-        let collapsed = self.core.is_collapsed(&group.path);
+        // A repo declared by hand and not yet used has nothing to fold and
+        // nothing to list: its row exists to be launched from (`F-repo-add`).
+        let empty = group.sessions.is_empty();
+        let collapsed = self.core.is_collapsed(&group.path) && !empty;
         // The disclosure triangle and the name both fold the session list —
         // a tree header should fold, not launch. Launching moved
         // to two explicit buttons beside it: `$` opens a plain shell, 🤖 a
         // fresh Claude session, both in the repo dir (FR4a).
-        let fold = fold_toggle(&group.path, collapsed);
+        let fold: Element<'_, Message> = if empty {
+            // Aligned with the triangles above and below it, so an empty row
+            // does not shift its whole group left.
+            iced::widget::Space::new().width(12).into()
+        } else {
+            fold_toggle(&group.path, collapsed)
+        };
         // A repo star pins the whole project group to the top of the sidebar
         // (F-favorites), mirroring the per-session star below.
         let repo_starred = self.core.is_repo_starred(&group.path);
@@ -264,10 +293,28 @@ impl Shell {
             strings::SIDEBAR_LAUNCH_CLAUDE,
             Message::LaunchClaude(group.path.clone()),
         );
-        let header = row![fold, repo_star, name, launch_shell, launch_claude]
+        let mut header = row![fold, repo_star, name, launch_shell, launch_claude]
             .spacing(6)
             .align_y(iced::Center);
+        // Only a declared repo can be taken back out; a discovered project has
+        // no declaration to drop, and the button must not promise one.
+        if self.core.is_repo_declared(&group.path) {
+            header = header.push(launch_button(
+                "✕",
+                strings::SIDEBAR_FORGET_REPO,
+                Message::ForgetRepo(group.path.clone()),
+            ));
+        }
         let mut g = column![header].spacing(4);
+        if empty {
+            return g
+                .push(
+                    text(strings::SIDEBAR_REPO_NO_SESSIONS)
+                        .size(11)
+                        .style(sidebar_secondary_text),
+                )
+                .into();
+        }
         // A folded project shows only its header, hiding the session list.
         if collapsed {
             return g.into();

@@ -262,6 +262,13 @@ pub enum Action {
     /// to synchronise follows with [`Request::WaitForStatus`].
     /// → `Event::TerminalInput`.
     Run { session: u64, bytes: Vec<u8> },
+    /// Add a repo to the sidebar by hand (`F-repo-add`). The path is normalised
+    /// adapter-side first, so the caller may pass a subdirectory or a worktree.
+    /// → `Event::DeclareRepo`.
+    DeclareRepo { path: String },
+    /// Drop a repo's declaration. The row survives on its sessions, if it has
+    /// any. → `Event::ForgetRepo`.
+    ForgetRepo { path: String },
 }
 
 /// The result of an [`Action`]. `error` is `Some` only when the action was
@@ -276,6 +283,21 @@ pub struct ActionOutcome {
     pub focused: Option<String>,
     /// Why the action was rejected, or `None` when it applied.
     pub error: Option<String>,
+    /// Set by the two repo actions only: what the sidebar row looks like now.
+    pub repo: Option<RepoOutcome>,
+}
+
+/// What a repo action did, for a caller that cannot see the sidebar. `path` is
+/// the **normalised** key, which a caller that passed a subdirectory or a
+/// worktree did not know; `visible` says whether a row is still there, which is
+/// the whole answer to "did forgetting remove it, or does it live on its
+/// sessions?".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoOutcome {
+    pub path: String,
+    pub declared: bool,
+    pub session_count: usize,
+    pub visible: bool,
 }
 
 impl ActionOutcome {
@@ -284,6 +306,7 @@ impl ActionOutcome {
         Self {
             focused: None,
             error: Some(reason.into()),
+            repo: None,
         }
     }
 
@@ -292,7 +315,15 @@ impl ActionOutcome {
         Self {
             focused,
             error: None,
+            repo: None,
         }
+    }
+
+    /// An applied repo action, which also reports the resulting sidebar row.
+    #[must_use]
+    pub fn with_repo(mut self, repo: RepoOutcome) -> Self {
+        self.repo = Some(repo);
+        self
     }
 }
 

@@ -15,7 +15,9 @@ use iced::Task;
 use termherd_core::workspace::{SessionId, SplitDir};
 use termherd_core::{Event, Launch};
 
-use super::bridge::{Action, ActionOutcome, Press, PressOutcome, PressStep, SessionKind};
+use super::bridge::{
+    Action, ActionOutcome, Press, PressOutcome, PressStep, RepoOutcome, SessionKind,
+};
 use super::input::event_of;
 use super::routing::KeyVerdict;
 use super::{Focus, Message, Shell, home_dir};
@@ -33,6 +35,51 @@ impl Shell {
             Action::Rename { tab, title } => self.act_rename(tab, title),
             Action::Close { pane } => self.act_close(pane),
             Action::Run { session, bytes } => self.act_run(session, bytes),
+            Action::DeclareRepo { path } => self.act_declare_repo(&path),
+            Action::ForgetRepo { path } => self.act_forget_repo(&path),
+        }
+    }
+
+    /// Add a repo to the sidebar. The path is normalised first — the caller may
+    /// have passed a subdirectory or a worktree and cannot know the key the
+    /// sidebar uses — and a path that does not exist is rejected before
+    /// anything applies, since its launch buttons could not work.
+    fn act_declare_repo(&mut self, path: &str) -> (ActionOutcome, Task<Message>) {
+        let Some(key) = termherd_scan::normalize_repo_path(std::path::Path::new(path)) else {
+            return (
+                ActionOutcome::rejected(format!("no such directory: {path}")),
+                Task::none(),
+            );
+        };
+        let key = key.display().to_string();
+        let effects = self.core.apply(Event::DeclareRepo(key.clone()));
+        let task = self.perform(effects);
+        (self.applied().with_repo(self.repo_outcome(&key)), task)
+    }
+
+    /// Drop a repo's declaration. Unlike declaring, an unknown path is not an
+    /// error: the caller asked for an absence and gets one. The outcome says
+    /// whether a row survived on its sessions.
+    fn act_forget_repo(&mut self, path: &str) -> (ActionOutcome, Task<Message>) {
+        let key = termherd_scan::normalize_repo_path(std::path::Path::new(path))
+            .map_or_else(|| path.to_owned(), |p| p.display().to_string());
+        let effects = self.core.apply(Event::ForgetRepo(key.clone()));
+        let task = self.perform(effects);
+        (self.applied().with_repo(self.repo_outcome(&key)), task)
+    }
+
+    /// The sidebar row for `key` as it stands now.
+    fn repo_outcome(&self, key: &str) -> RepoOutcome {
+        let row = self
+            .core
+            .visible_projects()
+            .into_iter()
+            .find(|group| group.path == key);
+        RepoOutcome {
+            path: key.to_owned(),
+            declared: self.core.is_repo_declared(key),
+            session_count: row.as_ref().map_or(0, |group| group.sessions.len()),
+            visible: row.is_some(),
         }
     }
 

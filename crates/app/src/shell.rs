@@ -42,6 +42,7 @@ mod input;
 mod launch;
 mod orchestrate;
 mod record;
+mod repos;
 mod routing;
 mod serve;
 mod session_ops;
@@ -364,6 +365,14 @@ enum Message {
     ToggleExpanded(String),
     SearchChanged(String),
     SearchTitlesOnly(bool),
+    /// Ask the OS for a folder to add to the sidebar (`F-repo-add`, `+` button).
+    PickRepoFolder,
+    /// A folder reached the app — from the picker or from a window file-drop.
+    /// The two gestures converge here so one path is normalised and tested.
+    /// `None` is a cancelled dialog.
+    RepoPicked(Option<PathBuf>),
+    /// Drop a hand-added repo's declaration (`F-repo-add`).
+    ForgetRepo(String),
     /// Open a fresh shell in the given project directory (FR4a, `$` button).
     LaunchProject(String),
     /// Start a fresh Claude session in the given project directory (FR4a, 🤖
@@ -615,6 +624,8 @@ impl Message {
                 | Self::CloseTab(_)
                 | Self::ToggleStar(_)
                 | Self::ToggleRepoStar(_)
+                | Self::PickRepoFolder
+                | Self::ForgetRepo(_)
                 | Self::ToggleArchive(_)
                 | Self::RequestArchive(_)
                 | Self::ToggleCollapsed(_)
@@ -1087,6 +1098,18 @@ impl Shell {
             }
             Message::ToggleRepoStar(path) => {
                 let effects = self.core.apply(termherd_core::Event::ToggleRepoStar(path));
+                self.perform(effects)
+            }
+            Message::PickRepoFolder => Task::perform(
+                // `rfd`'s async dialog owns the main-thread hop the platform
+                // needs; the future itself carries no runtime, which is what
+                // lets it run on the `futures` pool `Task::perform` polls.
+                rfd::AsyncFileDialog::new().pick_folder(),
+                |handle| Message::RepoPicked(handle.map(|h| h.path().to_owned())),
+            ),
+            Message::RepoPicked(path) => self.declare_repo(path.as_deref()),
+            Message::ForgetRepo(path) => {
+                let effects = self.core.apply(termherd_core::Event::ForgetRepo(path));
                 self.perform(effects)
             }
             Message::ToggleArchive(session) => {
@@ -1837,6 +1860,90 @@ mod key_routing {
             title: "nope".into(),
         });
         assert!(outcome.error.is_some(), "a missing tab is rejected");
+    }
+
+    /// A scanned session record in `project`, for the sidebar-membership tests.
+    fn scan_record(id: &str, project: &str) -> SessionRecord {
+        SessionRecord {
+            session_id: id.to_owned(),
+            project_path: project.to_owned(),
+            digest: termherd_claude::digest::SessionDigest {
+                summary: "hello".to_owned(),
+                message_count: 1,
+                text_content: String::new(),
+                slug: None,
+                custom_title: None,
+                ai_title: None,
+                tail: Vec::new(),
+            },
+            modified: None,
+        }
+    }
+
+    #[test]
+    fn add_repo_normalises_the_path_and_answers_with_the_key_it_kept() {
+        let (mut shell, _pty) = shell_with_terminal();
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("proj");
+        std::fs::create_dir_all(repo.join("crates")).unwrap();
+        std::fs::create_dir(repo.join(".git")).unwrap();
+
+        // The caller passes a subdirectory — it has no way to know the key.
+        let (outcome, _task) = shell.perform_action(BridgeAction::DeclareRepo {
+            path: repo.join("crates").display().to_string(),
+        });
+        assert_eq!(outcome.error, None);
+        let answer = outcome.repo.expect("a repo action answers about the row");
+        let expected = std::fs::canonicalize(&repo).unwrap().display().to_string();
+        assert_eq!(
+            answer.path, expected,
+            "the answer is the key to address the row with, not what was passed"
+        );
+        assert!(answer.declared && answer.visible);
+        assert_eq!(answer.session_count, 0);
+        assert!(shell.core.is_repo_declared(&expected));
+    }
+
+    #[test]
+    fn add_repo_rejects_a_path_that_does_not_exist() {
+        let (mut shell, _pty) = shell_with_terminal();
+        let (outcome, _task) = shell.perform_action(BridgeAction::DeclareRepo {
+            path: "/definitely/not/here".into(),
+        });
+        assert!(outcome.error.is_some(), "nothing to launch from, so refuse");
+        assert!(outcome.repo.is_none(), "and nothing was applied");
+    }
+
+    #[test]
+    fn forget_repo_reports_whether_the_row_survived_its_sessions() {
+        let (mut shell, _pty) = shell_with_terminal();
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = std::fs::canonicalize(tmp.path())
+            .unwrap()
+            .display()
+            .to_string();
+
+        let path = repo.clone();
+        let _ = shell.perform_action(BridgeAction::DeclareRepo { path: path.clone() });
+        // No sessions: forgetting takes the row with it.
+        let (outcome, _task) =
+            shell.perform_action(BridgeAction::ForgetRepo { path: path.clone() });
+        let answer = outcome.repo.expect("a repo action answers about the row");
+        assert!(!answer.declared && !answer.visible);
+
+        // Same repo, now with a scanned session: the row lives on without the
+        // declaration, and the answer says so rather than implying a removal.
+        let _ = shell.perform_action(BridgeAction::DeclareRepo { path: path.clone() });
+        shell
+            .core
+            .apply(termherd_core::Event::ScanCompleted(vec![scan_record(
+                "s1", &repo,
+            )]));
+        let (outcome, _task) = shell.perform_action(BridgeAction::ForgetRepo { path });
+        let answer = outcome.repo.expect("a repo action answers about the row");
+        assert!(!answer.declared, "the declaration is gone");
+        assert!(answer.visible, "but the scan still reports the project");
+        assert_eq!(answer.session_count, 1);
     }
 
     #[test]

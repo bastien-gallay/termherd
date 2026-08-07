@@ -143,6 +143,10 @@ impl Shell {
                     .apply(termherd_core::Event::WindowFocusChanged(false));
                 self.perform(effects)
             }
+            // A folder dropped on the window adds it to the sidebar
+            // (`F-repo-add`) — the same destination as the `+` picker, reached
+            // without a dialog.
+            window::Event::FileDropped(path) => self.declare_repo(Some(&path)),
             _ => Task::none(),
         }
     }

@@ -141,6 +141,7 @@ mod tests {
                     path: "/proj".to_owned(),
                     session_count: 2,
                     collapsed: false,
+                    declared: false,
                 }],
             }),
             tabs: Some(vec![

@@ -57,6 +57,7 @@ struct ProjectDto {
     path: String,
     session_count: usize,
     collapsed: bool,
+    declared: bool,
 }
 
 #[derive(Serialize)]
@@ -117,6 +118,7 @@ impl From<&WorkspaceSnapshot> for SnapshotDto {
                         path: project.path.clone(),
                         session_count: project.session_count,
                         collapsed: project.collapsed,
+                        declared: project.declared,
                     })
                     .collect(),
             }),

@@ -72,6 +72,7 @@ issues #18–#29.
 | [F-terminal-images](#f-terminal-images) | feature | terminal | ☐ | Render images inline in the terminal — parked, no demand and no cheap slice. |
 | [F-terminal-split](#f-terminal-split) | feature | workspace, keymap | ☐ | Split panes with directional focus; drag-resize is what remains. |
 | [F-close-on-exit](#f-close-on-exit) | feature | terminal, workspace | ✅ | A pane whose shell exits cleanly closes itself; a failed one stays readable. |
+| [F-repo-add](#f-repo-add) | feature | sidebar, sessions | ✅ | Declare a repository in the sidebar, before it has any session. |
 | [F-terminal-cwd](#f-terminal-cwd) | feature | terminal, mcp, sessions | ✅ | The shell announces the directory it is in, so a session's `cwd` follows a `cd`. |
 
 ## Could
@@ -87,6 +88,8 @@ issues #18–#29.
 | [F-mcp-control-surface](#f-mcp-control-surface) | feature | mcp | ☐ | Termherd exposes its own control and orchestration surface as an MCP server. |
 | [F-mcp-ide-bridge](#f-mcp-ide-bridge) | feature | mcp | ☐ | A live MCP/IDE bridge to Claude — termherd as the client, not the server. |
 | [F-multi-window](#f-multi-window) | feature | workspace | ☐ | More than one termherd window, and tabs that travel between them. |
+| [F-repo-prune](#f-repo-prune) | feature | sidebar | ☐ | Sweep the sidebar for projects whose directory no longer exists. |
+| [F-repo-remove](#f-repo-remove) | feature | sidebar | ☐ | Take a project or repository out of the sidebar, durably and explicitly. |
 | [F-repo-view](#f-repo-view) | feature | sidebar, sessions | ☐ | A per-repository surface to browse and manage one repo's sessions. |
 | [F-scheduled-tasks](#f-scheduled-tasks) | feature | sessions | ☐ | Launch a session on a schedule rather than on a click. |
 | [F-session-accent-colors](#f-session-accent-colors) | feature | workspace, sidebar | ☐ | A per-session accent on its tab, sidebar row and pane border. |
@@ -542,6 +545,74 @@ Windows: ConPTY never delivers reader EOF on a child's natural exit, so the
 `pty` adapter reaps in a dedicated waiter thread. Fixed policy, no settings
 knob
 
+<a id="f-repo-add"></a>
+
+### F-repo-add
+
+Declare a repository in the sidebar, before it has any session.
+
+**#279.** A sidebar group is born from a *session*: the scan walks
+`~/.claude/projects`, so a repository you have never opened Claude in cannot
+appear, and the `$` / 🤖 launch buttons beside a project header — exactly the
+gesture you want for it — are out of reach. This adds the missing half.
+
+The change is one line of model and one of consequence. `RepoMeta`, already
+keyed by real project path in `~/.termherd/metadata.json` and already written
+to grow, gains a `declared` flag orthogonal to its star; and the sidebar stops
+being a pure function of the scan:
+
+```text
+visible = (discovered ∪ declared) − removed − presentation
+```
+
+Only the first two terms are in scope. The predicate is written **once** so
+[F-repo-remove](#f-repo-remove) and the ephemeral presentation mode (#265) can
+each drop their term into it rather than growing a second visibility rule.
+
+Three details carried the risk. The union is keyed on the path, so a declared
+repository that gains its first session stops being empty instead of doubling.
+And "declared repositories sort to the top until they have a session" meets the
+repo star from [F-favorites](#f-favorites), so the two became one ordered key
+(starred → declared-and-empty → recent activity) rather than two competing
+sorts of the same list.
+
+**The normalisation was designed wrong and corrected before a line was
+written**, which is the part worth keeping. The plan said a subdirectory
+resolves to its `repo_root()` — but the scan does not key on `repo_root()` at
+all: it keys on the session's `cwd` passed through `resolve_worktree`, and
+`repo_root()` *stops at a linked worktree*, whose `.git` is a file. Declaring a
+worktree that way would have filed it under a path the scan never produces, and
+the repository would have appeared twice — the exact duplicate-sidebar class
+FR1 pins, reintroduced by the rule meant to prevent it. The two compose
+instead, in order: file → parent, canonicalise, `repo_root()`, then
+`resolve_worktree`. One public function in `scan`, called by the declaration
+path and by the walk, because two crates each holding their own idea of "the
+same repository" would drift silently. Its test asserts against the walk's own
+output rather than a hand-written expectation, so a drift in *both* rules still
+fails.
+
+Two gestures, converging on a single event so there is one path to test: a `+`
+button opening the native folder dialog (`rfd`, `xdg-portal` on Linux so no GTK
+is pulled in), and a folder dropped on the window. Neither is exercisable
+headless, which is the argument for the convergence.
+
+The agent surface shipped with it: `ProjectSnapshot.declared`, so the ⌘⇧S
+capture and the MCP `snapshot` report it from one model, plus `add_repo`
+(answering with the key it kept, since the caller may have passed a worktree)
+and `forget_repo` (answering whether the row survived on its sessions).
+`add_repo` is the first MCP tool to write outside the workspace — into the
+overlay, never `settings.json`, so the file-only enumerations in the book stay
+true.
+
+One cleanup fell out of it. The snapshot restated the sidebar's filter and
+order in its own words under a doc-comment asking the next reader to keep the
+two in step; both now go through one `sidebar_row_shown` / `sidebar_row_order`
+pair, and a test walks three searches asserting the snapshot's rows *are* the
+rendered ones.
+
+Adjacent: [F-repo-view](#f-repo-view) (#148) takes the other end — this is
+about a repository *existing* in the sidebar, that one about *viewing* it.
+
 <a id="f-terminal-cwd"></a>
 
 ### F-terminal-cwd
@@ -814,6 +885,69 @@ one by dropping outside any window, both *blocked by* #149 and both reusing the
 in-window `TabDrag` plumbing that already reorders tabs. The gate is #149's
 conversion: `core::Workspace` is one tree today, so "which window owns this
 tab" has no representation yet
+
+<a id="f-repo-prune"></a>
+
+### F-repo-prune
+
+Sweep the sidebar for projects whose directory no longer exists.
+
+A maintenance pass, on demand. Nothing today knows whether a `ProjectGroup`'s
+path still exists on disk: the scan does `exists()` checks while collapsing
+worktrees and deriving a `cwd`, but a group's own liveness is never probed, so
+a deleted checkout keeps its row — with its star, its renames, and two launch
+buttons that will fail.
+
+The sweep runs **when asked**, not on every scan. An automatic version reads
+better and is the dangerous one: an unplugged external drive or an unmounted
+network volume would silently take a dozen projects with it. On demand, the
+list is proposed and confirmed before anything applies.
+
+It also does not delete. It sets the `removed` flag that
+[F-repo-remove](#f-repo-remove) owns, so an over-eager sweep is undone by the
+same *Show removed* toggle a manual removal is — the property that makes the
+whole thing safe to run without thinking about what is currently mounted.
+
+It concerns both halves of [F-repo-add](#f-repo-add)'s union: a declared
+repository whose directory was deleted, and a discovered project whose `cwd`
+went away. That symmetry is why it is a feature of its own rather than a
+paragraph in either.
+
+<a id="f-repo-remove"></a>
+
+### F-repo-remove
+
+Take a project or repository out of the sidebar, durably and explicitly.
+
+The subtraction term of the sidebar's membership rule, whose other half
+[F-repo-add](#f-repo-add) introduces:
+
+```text
+visible = (discovered ∪ declared) − removed − presentation
+```
+
+`removed` is one more flag on the `RepoMeta` overlay, and it means the same
+thing from both directions while doing two different things. On a repository
+that exists only because it was declared, removing clears the declaration and
+it genuinely disappears. On a *discovered* project nothing can be deleted —
+`~/.claude` is not ours to write and the next scan brings it back — so removing
+is a durable hide. One field covers both; the button's label is what changes.
+
+That is why this is not #265. **#265 is the ephemeral half** — reduce the
+sidebar for the duration of a screenshot, gone at the next launch — and the two
+were separated precisely so neither has to compromise: #265 weighed ephemeral
+against durable and could not pick, because the durable answer was a different
+gesture. A `hidden` flag beside `removed` would be two names for one invariant.
+
+Reversibility is the open design point. A *Show removed* toggle mirrors the
+archive checkbox that already exists for sessions and is the obvious answer;
+whether removal is offered per session as well as per project is a second
+question, and the model above is written per project path, so extending it is a
+decision rather than a consequence.
+
+[F-repo-prune](#f-repo-prune) is its automated caller: pruning sets this flag
+rather than erasing anything, which is what makes an over-eager sweep
+recoverable.
 
 <a id="f-repo-view"></a>
 

@@ -262,6 +262,8 @@ impl App {
             Event::ToggleRepoStar(path) => {
                 self.update_repo_meta(path, |meta| meta.starred = !meta.starred)
             }
+            Event::DeclareRepo(path) => self.update_repo_meta(path, |meta| meta.declared = true),
+            Event::ForgetRepo(path) => self.update_repo_meta(path, |meta| meta.declared = false),
             Event::ToggleArchive(session) => {
                 self.update_meta(session, |meta| meta.archived = !meta.archived)
             }

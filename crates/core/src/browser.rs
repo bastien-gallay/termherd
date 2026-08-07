@@ -34,8 +34,16 @@ impl ProjectGroup {
     /// When this project last saw activity (its freshest session).
     #[must_use]
     pub fn last_activity(&self) -> Option<SystemTime> {
-        self.sessions.iter().filter_map(|s| s.modified).max()
+        last_activity(&self.sessions)
     }
+}
+
+/// When a set of sessions last saw activity. Free-standing so the sidebar can
+/// ask it of a borrowed slice — the snapshot orders rows without materialising
+/// the groups the rendering path clones.
+#[must_use]
+pub fn last_activity(sessions: &[SessionRecord]) -> Option<SystemTime> {
+    sessions.iter().filter_map(|s| s.modified).max()
 }
 
 /// A compact, language-neutral relative age — `now`, `5m`, `3h`, `2d`, `4w`,

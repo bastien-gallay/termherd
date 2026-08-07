@@ -198,6 +198,11 @@ pub struct ProjectSnapshot {
     pub session_count: usize,
     /// Whether the project's session list is folded shut.
     pub collapsed: bool,
+    /// Whether the user added this repo to the sidebar by hand (`F-repo-add`).
+    /// True whether or not the scan also reports sessions for it; a row that is
+    /// `declared` with `session_count: 0` is a launch point waiting for its
+    /// first session, not a project that lost one.
+    pub declared: bool,
 }
 
 /// One open tab: its label, the most-urgent status among its sessions, and its

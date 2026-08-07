@@ -5,8 +5,9 @@
 //! terminal text), shaped by a [`SnapshotFilter`]. Pure — no I/O, no panic.
 
 use std::collections::BTreeMap;
+use std::time::SystemTime;
 
-use crate::browser::session_matches;
+use crate::browser::{last_activity, session_matches};
 use crate::snapshot::{
     ConfigSummary, FocusRef, PaneSnapshot, ProjectSnapshot, Section, SessionKind, SidebarSnapshot,
     SnapshotFilter, SnapshotInputs, TabSnapshot, TerminalScope, WorkspaceSnapshot, tail_lines,
@@ -65,38 +66,47 @@ impl App {
     /// project (its path, visible-session count, and fold state). The full
     /// per-session browser rows are a deeper read, deliberately out.
     ///
-    /// Counts are computed over *borrowed* records — mirroring
-    /// [`Self::visible_projects`]'s search + archive predicate and repo-star
-    /// order, but without cloning the digests it materialises for rendering.
-    /// Keep the two in step: a change to the visible-project filtering belongs
-    /// in both.
+    /// Counts are computed over *borrowed* records — the same union, search +
+    /// archive predicate and row order as [`Self::visible_projects`], but
+    /// without cloning the digests it materialises for rendering. The shared
+    /// parts go through `sidebar_row_shown` / `sidebar_row_order` rather than
+    /// being restated here.
     fn sidebar_snapshot(&self) -> SidebarSnapshot {
         let needle = self.sidebar.search.trim().to_lowercase();
         let titles_only = self.sidebar.search_titles_only;
-        let mut projects: Vec<ProjectSnapshot> = self
-            .sidebar
-            .projects
-            .iter()
-            .filter_map(|group| {
+        let mut rows: Vec<(ProjectSnapshot, Option<SystemTime>)> = self
+            .merged_rows()
+            .into_iter()
+            .filter_map(|(path, sessions)| {
                 // A path hit keeps the group whole (like `filter_projects`);
                 // otherwise only content/title matches count. Then archived rows
                 // drop unless shown. An empty needle keeps every session.
-                let path_hit = needle.is_empty() || group.path.to_lowercase().contains(&needle);
-                let session_count = group
-                    .sessions
+                let path_hit = needle.is_empty() || path.to_lowercase().contains(&needle);
+                let session_count = sessions
                     .iter()
                     .filter(|s| path_hit || session_matches(s, &needle, titles_only))
                     .filter(|s| self.sidebar.show_archived || !self.is_archived(&s.session_id))
                     .count();
-                (session_count > 0).then(|| ProjectSnapshot {
-                    path: group.path.clone(),
-                    session_count,
-                    collapsed: self.is_collapsed(&group.path),
+                // The search applies to a declared repo like any other: it earns
+                // its row by matching, then keeps it by being declared.
+                let matched = path_hit || session_count > 0;
+                (matched && self.sidebar_row_shown(path, session_count)).then(|| {
+                    (
+                        ProjectSnapshot {
+                            path: path.to_owned(),
+                            session_count,
+                            collapsed: self.is_collapsed(path),
+                            declared: self.is_repo_declared(path),
+                        },
+                        last_activity(sessions),
+                    )
                 })
             })
             .collect();
-        // Repo-starred groups sort first, matching the rendered order.
-        projects.sort_by_key(|project| !self.is_repo_starred(&project.path));
+        rows.sort_by_key(|(project, last)| {
+            self.sidebar_row_order(&project.path, project.session_count, *last)
+        });
+        let projects: Vec<ProjectSnapshot> = rows.into_iter().map(|(project, _)| project).collect();
         SidebarSnapshot {
             hidden: self.sidebar.hidden,
             search: self.sidebar.search.clone(),
@@ -279,6 +289,63 @@ mod tests {
         assert_eq!(project.path, "/p");
         assert_eq!(project.session_count, 2, "both sessions are visible");
         assert!(project.collapsed, "the project was folded shut");
+        assert!(!project.declared, "this one came from the scan");
+    }
+
+    #[test]
+    fn a_declared_repo_reaches_the_snapshot_with_no_sessions() {
+        let mut app = App::new();
+        app.apply(Event::ScanCompleted(vec![record("s0", "/scanned", "one")]));
+        app.apply(Event::DeclareRepo("/fresh".into()));
+
+        let snap = app.snapshot(
+            &only_sections(&[Section::Sidebar]),
+            &SnapshotInputs::default(),
+        );
+        let sidebar = snap.sidebar.expect("sidebar was requested");
+        let rows: Vec<(&str, usize, bool)> = sidebar
+            .projects
+            .iter()
+            .map(|p| (p.path.as_str(), p.session_count, p.declared))
+            .collect();
+        // Same union, same order as the rendered sidebar: the declaration
+        // outranks activity until it has a session of its own.
+        assert_eq!(rows, vec![("/fresh", 0, true), ("/scanned", 1, false)]);
+    }
+
+    #[test]
+    fn the_snapshot_rows_match_the_rendered_ones_declarations_included() {
+        // The snapshot used to restate the sidebar's filter and order in its
+        // own words, with a doc-comment asking the next reader to keep them in
+        // step. This is that request, made checkable.
+        let mut app = App::new();
+        app.apply(Event::ScanCompleted(vec![
+            record("s0", "/busy", "one"),
+            record("s1", "/quiet", "two"),
+        ]));
+        app.apply(Event::DeclareRepo("/fresh".into()));
+        app.apply(Event::ToggleRepoStar("/quiet".into()));
+
+        for search in ["", "e", "no-such-thing"] {
+            app.apply(Event::SearchChanged(search.into()));
+            let snap = app.snapshot(
+                &only_sections(&[Section::Sidebar]),
+                &SnapshotInputs::default(),
+            );
+            let snapped: Vec<String> = snap
+                .sidebar
+                .expect("sidebar was requested")
+                .projects
+                .into_iter()
+                .map(|p| p.path)
+                .collect();
+            let rendered: Vec<String> = app
+                .visible_projects()
+                .into_iter()
+                .map(|group| group.path)
+                .collect();
+            assert_eq!(snapped, rendered, "search {search:?}");
+        }
     }
 
     #[test]
