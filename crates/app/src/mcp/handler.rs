@@ -238,11 +238,15 @@ impl TermherdMcp {
     #[tool(
         name = "add_repo",
         description = "Add the repository at `path` to the sidebar, so it can be \
-                       launched from before it has any Claude session. `path` may \
-                       be a subdirectory or a git worktree: it is normalised to \
-                       the key the sidebar uses, returned as `repo_path` — use \
-                       that, not what you passed, to address the row afterwards. \
-                       A path that does not exist is rejected."
+                       launched from before it has any Claude session. `path` is \
+                       filed by the same rule the scan uses for a session's cwd: \
+                       a git worktree collapses onto its main checkout, a file \
+                       becomes its parent directory, anything else is kept as \
+                       given — symlinks included, and NOT climbed to a repository \
+                       root, so pass the directory you want the row for. The key \
+                       actually kept comes back as `repo_path`; address the row \
+                       with that, not with what you sent. A path that does not \
+                       exist, or a relative one, is rejected."
     )]
     async fn add_repo(
         &self,
@@ -787,9 +791,9 @@ struct RenameArgs {
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[schemars(crate = "rmcp::schemars")]
 struct RepoArgs {
-    /// A directory. Normalised to the sidebar's key: a file becomes its parent,
-    /// a subdirectory climbs to its repository, a worktree collapses onto the
-    /// main checkout.
+    /// An absolute directory. Filed by the scan's own key rule: a worktree
+    /// collapses onto its main checkout, a file becomes its parent, anything
+    /// else is kept as given — never climbed to a repository root.
     path: String,
 }
 

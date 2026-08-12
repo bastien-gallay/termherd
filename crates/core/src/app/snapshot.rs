@@ -4,14 +4,12 @@
 //! sidebar, sessions) plus the adapter-injected [`SnapshotInputs`] (config,
 //! terminal text), shaped by a [`SnapshotFilter`]. Pure — no I/O, no panic.
 
-use std::collections::BTreeMap;
-use std::time::SystemTime;
-
-use crate::browser::{last_activity, session_matches};
+use crate::browser::{SessionRecord, session_matches};
 use crate::snapshot::{
     ConfigSummary, FocusRef, PaneSnapshot, ProjectSnapshot, Section, SessionKind, SidebarSnapshot,
     SnapshotFilter, SnapshotInputs, TabSnapshot, TerminalScope, WorkspaceSnapshot, tail_lines,
 };
+use std::collections::BTreeMap;
 
 use super::*;
 
@@ -74,7 +72,7 @@ impl App {
     fn sidebar_snapshot(&self) -> SidebarSnapshot {
         let needle = self.sidebar.search.trim().to_lowercase();
         let titles_only = self.sidebar.search_titles_only;
-        let mut rows: Vec<(ProjectSnapshot, Option<SystemTime>)> = self
+        let mut rows: Vec<(ProjectSnapshot, &[SessionRecord])> = self
             .merged_rows()
             .into_iter()
             .filter_map(|(path, sessions)| {
@@ -98,14 +96,12 @@ impl App {
                             collapsed: self.is_collapsed(path),
                             declared: self.is_repo_declared(path),
                         },
-                        last_activity(sessions),
+                        sessions,
                     )
                 })
             })
             .collect();
-        rows.sort_by_key(|(project, last)| {
-            self.sidebar_row_order(&project.path, project.session_count, *last)
-        });
+        rows.sort_by_key(|(project, unfiltered)| self.sidebar_row_order(&project.path, unfiltered));
         let projects: Vec<ProjectSnapshot> = rows.into_iter().map(|(project, _)| project).collect();
         SidebarSnapshot {
             hidden: self.sidebar.hidden,
@@ -319,14 +315,24 @@ mod tests {
         // own words, with a doc-comment asking the next reader to keep them in
         // step. This is that request, made checkable.
         let mut app = App::new();
+        // Distinct mtimes, or every activity key is equal and the ordering
+        // half of this assertion cannot fail — which is how it first shipped.
+        let at = |id: &str, path: &str, secs: u64, summary: &str| {
+            let mut r = record(id, path, summary);
+            r.modified = Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs));
+            r
+        };
         app.apply(Event::ScanCompleted(vec![
-            record("s0", "/busy", "one"),
-            record("s1", "/quiet", "two"),
+            at("s0", "/busy", 300, "the newest one"),
+            at("s1", "/busy", 10, "an elderly one"),
+            at("s2", "/quiet", 200, "an elderly one"),
         ]));
         app.apply(Event::DeclareRepo("/fresh".into()));
         app.apply(Event::ToggleRepoStar("/quiet".into()));
 
-        for search in ["", "e", "no-such-thing"] {
+        // "elderly" excludes `/busy`'s leading session, so a key taken from the
+        // filtered set would reorder the two — on one side and not the other.
+        for search in ["", "elderly", "e", "no-such-thing"] {
             app.apply(Event::SearchChanged(search.into()));
             let snap = app.snapshot(
                 &only_sections(&[Section::Sidebar]),

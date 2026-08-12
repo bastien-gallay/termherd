@@ -50,6 +50,9 @@ never opened Claude in is invisible — including the one you are about to start
 work in. **+ Add a repo** puts it there anyway: pick a folder, or **drop one on
 the window**. Both do the same thing.
 
+Drop a **folder**, not a file: a dropped file is ignored, so dragging one onto
+a terminal never quietly adds its directory.
+
 The row that appears carries the same `$` and 🤖 buttons as any other, and says
 `No sessions yet` until it has one. When it does, it becomes an ordinary
 project row — there is no second entry.
@@ -60,10 +63,16 @@ the button only appears on rows you added, since a discovered project has no
 declaration to drop. Removing a repository that has since gained sessions drops
 only the addition — the project stays, because the scan still finds it.
 
-What you pick is not always what is stored. A file becomes the folder holding
-it, a subdirectory climbs to its repository root, and a git worktree collapses
-onto its main checkout — the same rule the scan applies to a session's working
-directory, which is what keeps one repository on one row.
+What you pick is not always what is stored, but it is filed by **exactly the
+rule the scan uses** for a session's working directory — that agreement is what
+keeps one repository on one row. A git worktree collapses onto its main
+checkout; a file becomes the folder holding it; everything else is stored as
+given, symlinks and all.
+
+One consequence is worth knowing: a **subdirectory is not climbed**. Add
+`~/dev/app/crates/core` and you get a row for that subdirectory, not for
+`~/dev/app` — because a Claude session started there is filed the same way.
+Add the directory you actually want the row for.
 
 Additions live in `~/.termherd/metadata.json`, beside stars and renames.
 Nothing is written under `~/.claude`.

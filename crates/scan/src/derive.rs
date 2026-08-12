@@ -7,7 +7,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use termherd_claude::derive::{collapse_worktree, extract_cwd};
+use termherd_claude::derive::extract_cwd;
 
 use crate::cache::{ScanCache, file_sig};
 
@@ -60,13 +60,4 @@ fn subdir_cwd(dir: &Path) -> Option<(PathBuf, String)> {
         }
     }
     None
-}
-
-/// Collapse a worktree checkout onto its main project — only when the
-/// candidate parent actually exists, like upstream's `fs.existsSync`.
-pub(crate) fn resolve_worktree(cwd: &str) -> String {
-    match collapse_worktree(cwd) {
-        Some(parent) if Path::new(parent).exists() => parent.to_owned(),
-        _ => cwd.to_owned(),
-    }
 }

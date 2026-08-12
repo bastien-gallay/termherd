@@ -13,7 +13,8 @@ use termherd_core::SessionRecord;
 use termherd_core::ports::ScanError;
 
 use crate::cache::{CachedCwd, CachedDigest, ScanCache, file_sig};
-use crate::derive::{cached_cwd, derive_cwd, jsonl_files, resolve_worktree};
+use crate::derive::{cached_cwd, derive_cwd, jsonl_files};
+use crate::repo::sidebar_key;
 
 /// Result of walking a projects root: the derived session records, plus the
 /// folders whose project path could not be derived (kept so the caller —
@@ -70,7 +71,7 @@ fn scan_folder(dir: &Path, old: &ScanCache, next: &mut ScanCache) -> Option<Vec<
     }
     // The worktree collapse re-runs every scan: it depends on the parent
     // existing on disk *now*, not on the transcript the cwd came from.
-    let project_path = resolve_worktree(&cwd);
+    let project_path = sidebar_key(&cwd);
 
     // Pass 2 — digest the direct session files, re-reading only the ones
     // whose signature changed since the previous scan.

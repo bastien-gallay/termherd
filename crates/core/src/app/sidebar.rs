@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use crate::browser::{MatchSnippet, ProjectGroup, SessionRecord, content_snippet, filter_projects};
+use crate::browser::{MatchSnippet, ProjectGroup, SessionRecord, content_snippet, filter_rows};
 
 use super::*;
 
@@ -84,16 +84,6 @@ impl App {
         rows
     }
 
-    fn merged_projects(&self) -> Vec<ProjectGroup> {
-        self.merged_rows()
-            .into_iter()
-            .map(|(path, sessions)| ProjectGroup {
-                path: path.to_owned(),
-                sessions: sessions.to_vec(),
-            })
-            .collect()
-    }
-
     /// Whether a sidebar row survives once its sessions have been filtered:
     /// something to show, or a declaration that justifies an empty row
     /// (`F-repo-add`).
@@ -106,17 +96,33 @@ impl App {
     /// outranks recency. Both the rendered list and the snapshot ask for it
     /// here — the two used to hold hand-written copies of this rule, with a
     /// doc-comment asking the next reader to keep them in step.
+    ///
+    /// `sessions` is the row's **unfiltered** session list, deliberately. Keyed
+    /// on the filtered one, typing in the search box would reorder the projects
+    /// under the cursor — a search narrows a list, it does not rearrange it —
+    /// and a repo whose sessions are merely all archived would be mistaken for
+    /// one that never had any, and pinned to the top as if freshly added.
     pub(super) fn sidebar_row_order(
         &self,
         path: &str,
-        shown_sessions: usize,
-        last_activity: Option<std::time::SystemTime>,
+        sessions: &[SessionRecord],
     ) -> (bool, bool, std::cmp::Reverse<Option<std::time::SystemTime>>) {
         (
             !self.is_repo_starred(path),
-            !(shown_sessions == 0 && self.is_repo_declared(path)),
-            std::cmp::Reverse(last_activity),
+            !(sessions.is_empty() && self.is_repo_declared(path)),
+            std::cmp::Reverse(crate::browser::last_activity(sessions)),
         )
+    }
+
+    /// Whether the scan reports any session at all for `path`, archived or not
+    /// — what tells "added, never used" apart from "everything is filtered out"
+    /// for a row the filters emptied.
+    #[must_use]
+    pub fn repo_has_sessions(&self, path: &str) -> bool {
+        self.sidebar
+            .projects
+            .iter()
+            .any(|group| group.path == path && !group.sessions.is_empty())
     }
 
     /// The sidebar's view of the projects: the scan's groups united with the
@@ -132,12 +138,8 @@ impl App {
     /// would silently undo the first.
     #[must_use]
     pub fn visible_projects(&self) -> Vec<ProjectGroup> {
-        let merged = self.merged_projects();
-        let mut groups = filter_projects(
-            &merged,
-            &self.sidebar.search,
-            self.sidebar.search_titles_only,
-        );
+        let rows = self.merged_rows();
+        let mut groups = filter_rows(&rows, &self.sidebar.search, self.sidebar.search_titles_only);
         for group in &mut groups {
             if !self.sidebar.show_archived {
                 group.sessions.retain(|s| !self.is_archived(&s.session_id));
@@ -148,9 +150,16 @@ impl App {
                 .sort_by_key(|s| !self.is_starred(&s.session_id));
         }
         groups.retain(|group| self.sidebar_row_shown(&group.path, group.sessions.len()));
-        // Stable, so equal keys keep the path order `group_projects` gave them.
+        // The order is keyed on the *unfiltered* rows, so a search narrows the
+        // list without rearranging it. Stable, so equal keys keep the path order
+        // `group_projects` gave them.
+        let unfiltered: HashMap<&str, &[SessionRecord]> = rows.iter().copied().collect();
         groups.sort_by_key(|group| {
-            self.sidebar_row_order(&group.path, group.sessions.len(), group.last_activity())
+            let sessions = unfiltered
+                .get(group.path.as_str())
+                .copied()
+                .unwrap_or_default();
+            self.sidebar_row_order(&group.path, sessions)
         });
         groups
     }
@@ -698,6 +707,59 @@ mod tests {
             declared: true,
         };
         assert!(!declared.is_default());
+    }
+
+    #[test]
+    fn searching_narrows_the_sidebar_without_reordering_it() {
+        let mut app = App::new();
+        // `/busy` leads on its newest session, and that is the session the
+        // search excludes. Keyed on the *filtered* list, `/busy` would fall to
+        // 1 and drop below `/quiet` as the user types — rows moving under the
+        // cursor mid-search.
+        let with_summary = |id: &str, path: &str, at: u64, summary: &str| {
+            let mut r = active(id, path, at);
+            r.digest.summary = summary.to_owned();
+            r
+        };
+        app.apply(Event::ScanCompleted(vec![
+            with_summary("fresh", "/busy", 100, "unrelated work"),
+            with_summary("stale", "/busy", 1, "keepme, the old one"),
+            with_summary("mid", "/quiet", 50, "keepme, the middle one"),
+        ]));
+        let before = shown(&app);
+        assert_eq!(before, vec!["/busy", "/quiet"]);
+
+        app.apply(Event::SearchChanged("keepme".into()));
+        let filtered = app.visible_projects();
+        assert_eq!(
+            filtered.iter().map(|g| g.path.clone()).collect::<Vec<_>>(),
+            before,
+            "a search narrows the list, it does not rearrange it"
+        );
+        assert_eq!(filtered[0].sessions.len(), 1, "but it did narrow");
+    }
+
+    #[test]
+    fn a_declared_repo_whose_sessions_are_all_archived_is_not_treated_as_fresh() {
+        let mut app = App::new();
+        app.apply(Event::ScanCompleted(vec![
+            active("old", "/declared", 1),
+            active("newer", "/other", 50),
+        ]));
+        app.apply(Event::DeclareRepo("/declared".into()));
+        app.apply(Event::ToggleArchive("old".into()));
+
+        // The row survives — it is declared — but it is a repo with a history,
+        // not one waiting for its first session, so it must not jump the queue.
+        assert_eq!(
+            shown(&app),
+            vec!["/other", "/declared"],
+            "an archived-away session is still a session"
+        );
+        assert!(
+            app.repo_has_sessions("/declared"),
+            "and the view can tell 'added, never used' from 'all filtered out'"
+        );
     }
 
     #[test]

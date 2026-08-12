@@ -1881,20 +1881,24 @@ mod key_routing {
     }
 
     #[test]
-    fn add_repo_normalises_the_path_and_answers_with_the_key_it_kept() {
+    fn add_repo_answers_with_the_key_it_kept() {
         let (mut shell, _pty) = shell_with_terminal();
         let tmp = tempfile::tempdir().unwrap();
         let repo = tmp.path().join("proj");
         std::fs::create_dir_all(repo.join("crates")).unwrap();
         std::fs::create_dir(repo.join(".git")).unwrap();
 
-        // The caller passes a subdirectory — it has no way to know the key.
+        // A worktree: the one case where the key differs from what was passed,
+        // because the scan collapses it too. The rule itself is `scan`'s and is
+        // tested against the walk there; this asserts the answer carries it.
+        let worktree = repo.join(".worktrees").join("feat");
+        std::fs::create_dir_all(&worktree).unwrap();
         let (outcome, _task) = shell.perform_action(BridgeAction::DeclareRepo {
-            path: repo.join("crates").display().to_string(),
+            path: worktree.display().to_string(),
         });
         assert_eq!(outcome.error, None);
         let answer = outcome.repo.expect("a repo action answers about the row");
-        let expected = std::fs::canonicalize(&repo).unwrap().display().to_string();
+        let expected = repo.display().to_string();
         assert_eq!(
             answer.path, expected,
             "the answer is the key to address the row with, not what was passed"
@@ -1902,6 +1906,17 @@ mod key_routing {
         assert!(answer.declared && answer.visible);
         assert_eq!(answer.session_count, 0);
         assert!(shell.core.is_repo_declared(&expected));
+
+        // A subdirectory is *not* climbed: the scan keys a session started
+        // there at that subdirectory, so the declaration must match it.
+        let sub = repo.join("crates");
+        let (outcome, _task) = shell.perform_action(BridgeAction::DeclareRepo {
+            path: sub.display().to_string(),
+        });
+        assert_eq!(
+            outcome.repo.expect("an answer").path,
+            sub.display().to_string()
+        );
     }
 
     #[test]

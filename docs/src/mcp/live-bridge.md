@@ -66,12 +66,13 @@ they add four fields:
 | `session_count` | sessions on that row right now |
 | `in_sidebar` | whether a row is there at all |
 
-`repo_path` is the one to keep. `add_repo` accepts a file, a subdirectory or a
-git worktree and resolves each to the key the sidebar actually uses — the same
-rule the scan applies to a session's working directory, which is what stops one
-repository from occupying two rows. Address the row afterwards with what came
-back, not with what you sent. A path that does not exist is rejected, since its
-launch buttons could not work.
+`repo_path` is the one to keep. `add_repo` files a path by **exactly the rule
+the scan uses** for a session's working directory — a worktree collapses onto
+its main checkout, a file becomes its parent directory, everything else is kept
+as given (symlinks included, and *not* climbed to a repository root). That
+agreement is what stops one repository from occupying two rows, so address the
+row afterwards with what came back, not with what you sent. A path that does
+not exist, or a relative one, is rejected.
 
 `forget_repo` is the asymmetric one: forgetting a repository that was never
 added is **not** an error, and forgetting one the scan still reports leaves the

@@ -33,20 +33,33 @@ repo star from [F-favorites](#f-favorites), so the two became one ordered key
 (starred → declared-and-empty → recent activity) rather than two competing
 sorts of the same list.
 
-**The normalisation was designed wrong and corrected before a line was
-written**, which is the part worth keeping. The plan said a subdirectory
-resolves to its `repo_root()` — but the scan does not key on `repo_root()` at
-all: it keys on the session's `cwd` passed through `resolve_worktree`, and
-`repo_root()` *stops at a linked worktree*, whose `.git` is a file. Declaring a
-worktree that way would have filed it under a path the scan never produces, and
-the repository would have appeared twice — the exact duplicate-sidebar class
-FR1 pins, reintroduced by the rule meant to prevent it. The two compose
-instead, in order: file → parent, canonicalise, `repo_root()`, then
-`resolve_worktree`. One public function in `scan`, called by the declaration
-path and by the walk, because two crates each holding their own idea of "the
-same repository" would drift silently. Its test asserts against the walk's own
-output rather than a hand-written expectation, so a drift in *both* rules still
-fails.
+**The normalisation was got wrong twice, and the second time is the lesson.**
+The plan said a subdirectory resolves to its `repo_root()`; that was corrected
+before implementation, on the grounds that `repo_root()` stops at a linked
+worktree (whose `.git` is a file) and would file a declared worktree under a
+path the scan never produces. The correction composed `repo_root()` *with*
+`canonicalize` and the worktree collapse — and both of the added steps were
+themselves wrong, for the same reason the first version was, which review
+caught: **the scan applies neither**. It keys on the `cwd` the CLI wrote, and
+nothing else. So a declared subdirectory was filed at the repository root while
+a session started there was filed at the subdirectory (two rows), and
+`canonicalize` diverged wherever a symlink stood in the path — on Windows, for
+*every* repository, since it yields the `\\?\C:\…` form no transcript contains.
+
+What settled it is a rule, not a fix: there is **one** key function,
+`scan::sidebar_key`, and the walk and the declaration both call it. A step that
+only one side can apply is not normalisation, it is a second sidebar row. The
+cross-check test asserts against the walk's own output, and now on the cases
+that actually differ — a subdirectory, and a path through a symlink. Its first
+version passed vacuously: it exercised a worktree *root*, where the two rules
+coincide, and wrote the already-resolved path into the fixture's `cwd`, putting
+the same prefix on both sides of its own assertion.
+
+The Windows half is the sharper half. This entry cited `#239`'s lesson — a
+string destined for another grammar takes that grammar's separators — while the
+diff carried a fresh instance of it, and a `cargo check --target
+x86_64-pc-windows-msvc` was taken for a Windows check. It compiles either way:
+the divergence is behavioural, which is exactly what that job cannot see.
 
 Two gestures, converging on a single event so there is one path to test: a `+`
 button opening the native folder dialog (`rfd`, `xdg-portal` on Linux so no GTK
@@ -64,8 +77,14 @@ true.
 One cleanup fell out of it. The snapshot restated the sidebar's filter and
 order in its own words under a doc-comment asking the next reader to keep the
 two in step; both now go through one `sidebar_row_shown` / `sidebar_row_order`
-pair, and a test walks three searches asserting the snapshot's rows *are* the
-rendered ones.
+pair, and a test walks four searches asserting the snapshot's rows *are* the
+rendered ones — with distinct mtimes, without which every ordering key is equal
+and that assertion cannot fail.
+
+The row order is keyed on the **unfiltered** sessions, which review also
+caught: taken from the filtered set, typing in the search box reordered the
+projects under the cursor, and a repo whose sessions were merely all archived
+read as one that never had any and was pinned to the top as freshly added.
 
 Adjacent: [F-repo-view](#f-repo-view) (#148) takes the other end — this is
 about a repository *existing* in the sidebar, that one about *viewing* it.

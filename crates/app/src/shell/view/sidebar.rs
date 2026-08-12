@@ -258,7 +258,10 @@ impl Shell {
     ) -> Element<'_, Message> {
         // A repo declared by hand and not yet used has nothing to fold and
         // nothing to list: its row exists to be launched from (`F-repo-add`).
-        let empty = group.sessions.is_empty();
+        // "Not yet used" is asked of the scan, not of the filtered group — a
+        // repo whose every session is archived has a history, and saying it has
+        // none would be a lie the user can act on.
+        let empty = group.sessions.is_empty() && !self.core.repo_has_sessions(&group.path);
         let collapsed = self.core.is_collapsed(&group.path) && !empty;
         // The disclosure triangle and the name both fold the session list —
         // a tree header should fold, not launch. Launching moved

@@ -143,10 +143,17 @@ impl Shell {
                     .apply(termherd_core::Event::WindowFocusChanged(false));
                 self.perform(effects)
             }
-            // A folder dropped on the window adds it to the sidebar
+            // A *folder* dropped on the window adds it to the sidebar
             // (`F-repo-add`) — the same destination as the `+` picker, reached
-            // without a dialog.
-            window::Event::FileDropped(path) => self.declare_repo(Some(&path)),
+            // without a dialog. A dropped **file** is ignored: `FileDropped`
+            // carries no cursor position (iced 0.14), so the drop cannot be
+            // confined to the sidebar, and dragging a file onto a terminal is
+            // a thing people do — it must not silently declare its directory.
+            window::Event::FileDropped(path) if path.is_dir() => self.declare_repo(Some(&path)),
+            window::Event::FileDropped(path) => {
+                tracing::debug!(path = %path.display(), "dropped file ignored; drop a folder to add a repo");
+                Task::none()
+            }
             _ => Task::none(),
         }
     }

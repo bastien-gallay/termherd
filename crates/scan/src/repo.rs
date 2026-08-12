@@ -1,11 +1,15 @@
-//! Repository-root helper for the "new session in the same repo" shortcut, and
-//! the normalisation a hand-declared repo goes through before it reaches the
-//! core (`F-repo-add`). Both answer "which repository is this path in"; keeping
-//! them together is what stops the sidebar from holding two ideas of it.
+//! The sidebar key — [`sidebar_key`], the single rule that decides which
+//! sidebar row a directory belongs to, applied by the walk to a session's `cwd`
+//! and by a hand-added repo alike. Two rules here meant two rows for one
+//! repository, which is what this module exists to prevent.
+//!
+//! Also the repository-root helper for the "new session in the same repo"
+//! shortcut. Note that [`repo_root`] is *not* part of the key: it answers a
+//! different question — where to launch — and the two were briefly conflated.
 
 use std::path::{Path, PathBuf};
 
-use crate::derive::resolve_worktree;
+use termherd_claude::derive::collapse_worktree;
 
 /// The repository root for `start`: the nearest ancestor (including `start`
 /// itself) that holds a `.git` entry, or `None` if none does. The entry may be
@@ -27,25 +31,37 @@ pub fn repo_root(start: &Path) -> Option<PathBuf> {
     None
 }
 
-/// The sidebar key for a path the user picked by hand (`F-repo-add`): the same
-/// key the walk would derive for a session running there, so a declaration and
-/// a discovery of one repository land on one group.
+/// **The** sidebar key for a directory: the one rule, used by the scan for a
+/// session's `cwd` and by a hand-added repo alike (`F-repo-add`). A worktree
+/// checkout collapses onto its main project when that parent exists on disk,
+/// like upstream's `fs.existsSync`; everything else is the path as given.
 ///
-/// Four steps, and the order matters:
+/// Deliberately *nothing* else. Two transformations were tried here and
+/// removed, because the scan cannot apply them and a key it cannot produce is
+/// a second sidebar row for one repository:
 ///
-/// 1. a file resolves to the directory holding it (a picker may hand back one);
-/// 2. the path is canonicalised, so `..` and symlinks cannot spell one
-///    directory two ways;
-/// 3. [`repo_root`] climbs a subdirectory to its repository — a linked worktree
-///    carries a `.git` *file*, so this stops at the worktree, not at the main
-///    checkout;
-/// 4. `resolve_worktree` then collapses that worktree onto its main checkout,
-///    which is the rule the walk applies to a session's `cwd`. Skipping it
-///    would key a declared worktree under a path the scan never produces, and
-///    the repository would appear twice.
+/// - **no `canonicalize`** — the walk keys on the `cwd` the CLI wrote, which is
+///   the path the user's shell was standing in. Resolving symlinks would
+///   diverge whenever one is in play, and *always* on Windows, where
+///   canonicalisation returns the `\\?\C:\…` form no transcript ever contains.
+/// - **no [`repo_root`]** — a session started in a subdirectory is keyed at
+///   that subdirectory. Climbing to the repository would file a declaration
+///   under a path the scan never produces for it.
+#[must_use]
+pub fn sidebar_key(dir: &str) -> String {
+    match collapse_worktree(dir) {
+        Some(parent) if Path::new(parent).exists() => parent.to_owned(),
+        _ => dir.to_owned(),
+    }
+}
+
+/// The sidebar key for a path the user picked or dropped (`F-repo-add`).
 ///
-/// `None` when the path does not exist: there is nothing to declare, and a
-/// group whose launch buttons cannot work is worse than a refusal.
+/// A file resolves to the directory holding it, then [`sidebar_key`] applies
+/// the scan's rule and only that. `None` when the path does not exist — a row
+/// whose launch buttons cannot work is worse than a refusal — or when it is
+/// relative, since every key the walk produces is absolute and a relative one
+/// would be read against whatever directory the app happens to be in.
 #[must_use]
 pub fn normalize_repo_path(picked: &Path) -> Option<PathBuf> {
     let holder = if std::fs::metadata(picked).ok()?.is_file() {
@@ -53,9 +69,9 @@ pub fn normalize_repo_path(picked: &Path) -> Option<PathBuf> {
     } else {
         picked
     };
-    let dir = std::fs::canonicalize(holder).ok()?;
-    let root = repo_root(&dir).unwrap_or(dir);
-    Some(PathBuf::from(resolve_worktree(&root.to_string_lossy())))
+    holder
+        .is_absolute()
+        .then(|| PathBuf::from(sidebar_key(&holder.to_string_lossy())))
 }
 
 #[cfg(test)]
@@ -93,8 +109,8 @@ mod tests {
         assert_eq!(repo_root(&bare), None);
     }
 
-    /// A clone with a nested subdirectory and a linked worktree beside it —
-    /// the shape every normalisation test needs. Returns (repo, worktree).
+    /// A clone with a nested subdirectory and a linked worktree beside it.
+    /// Returns (repo, worktree).
     fn clone_with_a_worktree(tmp: &Path) -> (PathBuf, PathBuf) {
         let repo = tmp.join("proj");
         fs::create_dir_all(repo.join("crates").join("core")).unwrap();
@@ -106,48 +122,94 @@ mod tests {
         (repo, worktree)
     }
 
-    /// What the canonicalised repo root compares as — macOS hands back
-    /// `/private/var/...` for a `/var/...` tempdir, so an expectation built
-    /// from the raw tempdir path would fail for a reason unrelated to the rule.
-    fn canonical(path: &Path) -> PathBuf {
-        fs::canonicalize(path).unwrap()
+    fn as_key(path: &Path) -> String {
+        path.display().to_string().replace('\\', "/")
+    }
+
+    /// The key the *walk* derives for a session whose transcript records `cwd`
+    /// — the only trustworthy expectation, since it is the thing a declaration
+    /// has to agree with. Writes a throwaway `~/.claude/projects` under `tmp`
+    /// and runs the real scan over it.
+    fn walked_key(tmp: &Path, folder: &str, cwd: &str) -> String {
+        let projects = tmp.join("projects").join(folder);
+        fs::create_dir_all(&projects).unwrap();
+        fs::write(
+            projects.join("abc.jsonl"),
+            format!("{{\"type\":\"user\",\"cwd\":\"{cwd}\",\"message\":\"hi\"}}\n"),
+        )
+        .unwrap();
+        let records = <crate::FsScanner as termherd_core::ports::ProjectScanner>::scan(
+            &crate::FsScanner::new(tmp.join("projects")),
+        )
+        .unwrap();
+        let hit = records
+            .iter()
+            .find(|r| projects.join(format!("{}.jsonl", r.session_id)).exists())
+            .expect("the scan found the session just written");
+        hit.project_path.clone()
+    }
+
+    #[test]
+    fn the_declared_key_is_the_walked_key_for_a_subdirectory() {
+        // The case the first version of this test skipped, and the one the
+        // removed `repo_root` step got wrong: a session started in a
+        // subdirectory is keyed *at* that subdirectory, so a declaration of it
+        // must be too, or the repository occupies two rows.
+        let tmp = tempfile::tempdir().unwrap();
+        let (repo, _) = clone_with_a_worktree(tmp.path());
+        let deep = repo.join("crates").join("core");
+
+        let walked = walked_key(tmp.path(), "C--proj-crates-core", &as_key(&deep));
+        assert_eq!(normalize_repo_path(&deep).map(|p| as_key(&p)), Some(walked));
+        assert_ne!(
+            normalize_repo_path(&deep),
+            Some(repo.clone()),
+            "climbing to the repo root is what produced the duplicate row"
+        );
+    }
+
+    // The symlink case lives in `tests/symlinked_repo_key.rs`: it needs an
+    // OS-conditional API, and the containment gate scans `src/**` only —
+    // allow-listing this file for a test would licence OS-conditional
+    // *production* code here unnoticed.
+
+    #[test]
+    fn the_declared_key_is_the_walked_key_for_a_worktree_and_its_subdirectories() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (repo, worktree) = clone_with_a_worktree(tmp.path());
+
+        // `repo_root` stops at the worktree — its `.git` is a file — which is
+        // why it is not the key rule.
+        assert_eq!(repo_root(&worktree).as_deref(), Some(worktree.as_path()));
+
+        let walked = walked_key(tmp.path(), "C--proj-worktrees-feat", &as_key(&worktree));
+        assert_eq!(walked, as_key(&repo), "the walk collapses the worktree");
+        assert_eq!(
+            normalize_repo_path(&worktree).map(|p| as_key(&p)),
+            Some(walked.clone())
+        );
+        // A subdirectory of a worktree is keyed at that subdirectory (no climb),
+        // and the collapse does not apply to it — it is not the final component.
+        let inside = worktree.join("crates");
+        assert_eq!(
+            normalize_repo_path(&inside).map(|p| as_key(&p)),
+            Some(walked_key(
+                tmp.path(),
+                "C--proj-worktrees-feat-crates",
+                &as_key(&inside)
+            ))
+        );
     }
 
     #[test]
     fn normalize_takes_a_file_to_the_directory_holding_it() {
         let tmp = tempfile::tempdir().unwrap();
         let (repo, _) = clone_with_a_worktree(tmp.path());
-        let file = repo.join("crates").join("core").join("lib.rs");
+        let dir = repo.join("crates").join("core");
+        let file = dir.join("lib.rs");
         fs::write(&file, "// x\n").unwrap();
 
-        assert_eq!(normalize_repo_path(&file), Some(canonical(&repo)));
-    }
-
-    #[test]
-    fn normalize_climbs_a_subdirectory_to_its_repo_root() {
-        let tmp = tempfile::tempdir().unwrap();
-        let (repo, _) = clone_with_a_worktree(tmp.path());
-
-        let deep = repo.join("crates").join("core");
-        assert_eq!(normalize_repo_path(&deep), Some(canonical(&repo)));
-        // And the root itself is already the answer.
-        assert_eq!(normalize_repo_path(&repo), Some(canonical(&repo)));
-    }
-
-    #[test]
-    fn normalize_collapses_a_worktree_and_its_subdirectories_onto_the_checkout() {
-        let tmp = tempfile::tempdir().unwrap();
-        let (repo, worktree) = clone_with_a_worktree(tmp.path());
-
-        // `repo_root` alone would stop at the worktree — its `.git` is a file.
-        assert_eq!(repo_root(&worktree).as_deref(), Some(worktree.as_path()));
-        // Normalisation must not: the walk keys a session running there under
-        // the main checkout, so a declaration has to agree or the repo doubles.
-        assert_eq!(normalize_repo_path(&worktree), Some(canonical(&repo)));
-        assert_eq!(
-            normalize_repo_path(&worktree.join("crates")),
-            Some(canonical(&repo))
-        );
+        assert_eq!(normalize_repo_path(&file), Some(dir));
     }
 
     #[test]
@@ -157,45 +219,15 @@ mod tests {
         fs::create_dir(&notes).unwrap();
 
         // Any directory is declarable — a shell in a notes folder is a use.
-        assert_eq!(normalize_repo_path(&notes), Some(canonical(&notes)));
+        assert_eq!(normalize_repo_path(&notes), Some(notes));
     }
 
     #[test]
-    fn normalize_rejects_a_path_that_does_not_exist() {
+    fn normalize_rejects_a_missing_path_and_a_relative_one() {
         let tmp = tempfile::tempdir().unwrap();
         assert_eq!(normalize_repo_path(&tmp.path().join("gone")), None);
-    }
-
-    #[test]
-    fn normalize_agrees_with_the_key_the_walk_derives_for_the_same_worktree() {
-        // The assertion the other tests cannot make: not "normalisation returns
-        // the path we expect", but "it returns the path the scan produces".
-        // A hand-written expectation would keep passing if both rules drifted.
-        let tmp = tempfile::tempdir().unwrap();
-        let (_, worktree) = clone_with_a_worktree(tmp.path());
-
-        let projects = tmp.path().join("projects");
-        let folder = projects.join("C--proj-worktrees-feat");
-        fs::create_dir_all(&folder).unwrap();
-        let cwd = canonical(&worktree)
-            .display()
-            .to_string()
-            .replace('\\', "/");
-        fs::write(
-            folder.join("abc.jsonl"),
-            format!("{{\"type\":\"user\",\"cwd\":\"{cwd}\",\"message\":\"hi\"}}\n"),
-        )
-        .unwrap();
-
-        let records = <crate::FsScanner as termherd_core::ports::ProjectScanner>::scan(
-            &crate::FsScanner::new(projects),
-        )
-        .unwrap();
-        let walked = records[0].project_path.clone();
-
-        let declared = normalize_repo_path(&worktree)
-            .map(|p| p.display().to_string().replace('\\', "/"))
-            .unwrap();
-        assert_eq!(declared, walked);
+        // Relative: every key the walk produces is absolute, and this one would
+        // be read against whatever directory the app happens to be in.
+        assert_eq!(normalize_repo_path(Path::new("crates")), None);
     }
 }

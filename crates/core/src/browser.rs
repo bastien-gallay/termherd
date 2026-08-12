@@ -120,18 +120,33 @@ pub fn filter_projects(
     query: &str,
     titles_only: bool,
 ) -> Vec<ProjectGroup> {
-    let needle = query.trim().to_lowercase();
-    if needle.is_empty() {
-        return groups.to_vec();
-    }
-    groups
+    let rows: Vec<(&str, &[SessionRecord])> = groups
         .iter()
-        .filter_map(|group| {
-            if group.path.to_lowercase().contains(&needle) {
-                return Some(group.clone());
+        .map(|group| (group.path.as_str(), group.sessions.as_slice()))
+        .collect();
+    filter_rows(&rows, query, titles_only)
+}
+
+/// [`filter_projects`] over borrowed rows, which is what the sidebar actually
+/// holds once the scan's groups are united with the hand-added repos. Owning
+/// the union first would clone every digest in the browser on **every frame**,
+/// only to clone the survivors again here.
+#[must_use]
+pub fn filter_rows(
+    rows: &[(&str, &[SessionRecord])],
+    query: &str,
+    titles_only: bool,
+) -> Vec<ProjectGroup> {
+    let needle = query.trim().to_lowercase();
+    rows.iter()
+        .filter_map(|(path, sessions)| {
+            if needle.is_empty() || path.to_lowercase().contains(&needle) {
+                return Some(ProjectGroup {
+                    path: (*path).to_owned(),
+                    sessions: sessions.to_vec(),
+                });
             }
-            let sessions: Vec<SessionRecord> = group
-                .sessions
+            let sessions: Vec<SessionRecord> = sessions
                 .iter()
                 .filter(|s| session_matches(s, &needle, titles_only))
                 .cloned()
@@ -140,7 +155,7 @@ pub fn filter_projects(
                 None
             } else {
                 Some(ProjectGroup {
-                    path: group.path.clone(),
+                    path: (*path).to_owned(),
                     sessions,
                 })
             }
