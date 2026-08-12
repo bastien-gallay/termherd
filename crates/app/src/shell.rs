@@ -1107,11 +1107,10 @@ impl Shell {
                 rfd::AsyncFileDialog::new().pick_folder(),
                 |handle| Message::RepoPicked(handle.map(|h| h.path().to_owned())),
             ),
-            Message::RepoPicked(path) => self.declare_repo(path.as_deref()),
-            Message::ForgetRepo(path) => {
-                let effects = self.core.apply(termherd_core::Event::ForgetRepo(path));
-                self.perform(effects)
+            Message::RepoPicked(path) => {
+                self.declare_repo(path.as_deref(), repos::RepoGesture::Picker)
             }
+            Message::ForgetRepo(path) => self.forget_repo_key(&path, repos::RepoGesture::Button),
             Message::ToggleArchive(session) => {
                 let effects = self
                     .core

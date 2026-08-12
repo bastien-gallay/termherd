@@ -607,7 +607,13 @@ the divergence is behavioural, which is exactly what that job cannot see.
 Two gestures, converging on a single event so there is one path to test: a `+`
 button opening the native folder dialog (`rfd`, `xdg-portal` on Linux so no GTK
 is pulled in), and a folder dropped on the window. Neither is exercisable
-headless, which is the argument for the convergence.
+headless, which is the argument for the convergence — and the reason both log
+a `via` field naming the gesture. A declaration made by a drop is
+byte-for-byte the one made by the picker, so where no test can watch, the log
+is the only thing that can, and an unlabelled line says nothing about which
+surface a user actually reached. Dropping a declaration logs too, carrying
+whether the row survived on its sessions: "forgotten" and "gone from the
+sidebar" are different events and a reader would assume the second.
 
 The agent surface shipped with it: `ProjectSnapshot.declared`, so the ⌘⇧S
 capture and the MCP `snapshot` report it from one model, plus `add_repo`

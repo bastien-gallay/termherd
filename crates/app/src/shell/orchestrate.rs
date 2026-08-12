@@ -19,6 +19,7 @@ use super::bridge::{
     Action, ActionOutcome, Press, PressOutcome, PressStep, RepoOutcome, SessionKind,
 };
 use super::input::event_of;
+use super::repos::RepoGesture;
 use super::routing::KeyVerdict;
 use super::{Focus, Message, Shell, home_dir};
 
@@ -52,8 +53,7 @@ impl Shell {
             );
         };
         let key = key.display().to_string();
-        let effects = self.core.apply(Event::DeclareRepo(key.clone()));
-        let task = self.perform(effects);
+        let task = self.declare_repo_key(&key, RepoGesture::Mcp);
         (self.applied().with_repo(self.repo_outcome(&key)), task)
     }
 
@@ -63,8 +63,7 @@ impl Shell {
     fn act_forget_repo(&mut self, path: &str) -> (ActionOutcome, Task<Message>) {
         let key = termherd_scan::normalize_repo_path(std::path::Path::new(path))
             .map_or_else(|| path.to_owned(), |p| p.display().to_string());
-        let effects = self.core.apply(Event::ForgetRepo(key.clone()));
-        let task = self.perform(effects);
+        let task = self.forget_repo_key(&key, RepoGesture::Mcp);
         (self.applied().with_repo(self.repo_outcome(&key)), task)
     }
 
