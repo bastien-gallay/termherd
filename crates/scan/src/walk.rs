@@ -230,8 +230,11 @@ mod tests {
 
         let records = FsScanner::new(tmp.path().to_owned()).scan().unwrap();
         assert_eq!(records.len(), 1);
+        // Compared in one spelling: the key takes the platform's own separator
+        // (that is what folds `C:/x` and `C:\x` onto one row), while this
+        // fixture writes the Unix one into the transcript.
         assert_eq!(
-            records[0].project_path,
+            records[0].project_path.replace('\\', "/"),
             main.display().to_string().replace('\\', "/")
         );
 

@@ -38,7 +38,9 @@ fn walked_key(root: &Path, folder: &str, cwd: &str) -> String {
     )
     .unwrap();
     let records = FsScanner::new(projects).scan().unwrap();
-    records[0].project_path.clone()
+    // In the `/` spelling `as_key` uses: the key takes the platform's own
+    // separator, and this comparison is about the key, not the separator.
+    as_key(Path::new(&records[0].project_path))
 }
 
 #[cfg(unix)]

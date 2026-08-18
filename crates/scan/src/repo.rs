@@ -179,7 +179,9 @@ mod tests {
             .iter()
             .find(|r| r.session_id == folder)
             .expect("the scan found the session just written");
-        hit.project_path.clone()
+        // In the `/` spelling `as_key` uses, so a comparison is about the key
+        // and not about which separator the platform writes.
+        as_key(Path::new(&hit.project_path))
     }
 
     #[test]
