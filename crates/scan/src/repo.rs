@@ -159,8 +159,15 @@ mod tests {
     fn walked_key(tmp: &Path, folder: &str, cwd: &str) -> String {
         let projects = tmp.join("projects").join(folder);
         fs::create_dir_all(&projects).unwrap();
+        // The transcript is named after its folder, so the session id is unique
+        // across the fixtures one test writes. The scan keys sessions by that
+        // id: named `abc` alike, two fixtures collided into a single record and
+        // the survivor was whichever the filesystem enumerated last — so a test
+        // asserting about one directory was answered about another. Stable on
+        // APFS, the other way round on ext4 and on Windows, which is why it
+        // read green here and failed in CI on both.
         fs::write(
-            projects.join("abc.jsonl"),
+            projects.join(format!("{folder}.jsonl")),
             format!("{{\"type\":\"user\",\"cwd\":\"{cwd}\",\"message\":\"hi\"}}\n"),
         )
         .unwrap();
@@ -170,7 +177,7 @@ mod tests {
         .unwrap();
         let hit = records
             .iter()
-            .find(|r| projects.join(format!("{}.jsonl", r.session_id)).exists())
+            .find(|r| r.session_id == folder)
             .expect("the scan found the session just written");
         hit.project_path.clone()
     }
@@ -242,13 +249,23 @@ mod tests {
         // A subdirectory of a worktree is keyed at that subdirectory (no climb),
         // and the collapse does not apply to it — it is not the final component.
         let inside = worktree.join("crates");
+        let walked_inside = walked_key(
+            tmp.path(),
+            "C--proj-worktrees-feat-crates",
+            &as_key(&inside),
+        );
+        // Spelled out, not just compared to the other side: an expectation that
+        // is only ever "whatever the walk said" cannot tell a wrong answer from
+        // a wrong *fixture*, which is how this read green while the lookup was
+        // picking a neighbouring transcript.
+        assert_eq!(
+            walked_inside,
+            as_key(&inside),
+            "the collapse wants the worktree as the final component"
+        );
         assert_eq!(
             normalize_repo_path(&inside).map(|p| as_key(&p)),
-            Some(walked_key(
-                tmp.path(),
-                "C--proj-worktrees-feat-crates",
-                &as_key(&inside)
-            ))
+            Some(walked_inside)
         );
     }
 
