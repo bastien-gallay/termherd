@@ -247,7 +247,10 @@ Swapping iced for egui/GPUI (OQ1) touches only this crate.
 2. Digests upserted into `store` (SQLite + FTS5) in a transaction — once
    `F-store-cache` (Should) lands; v1 Must keeps them in memory.
 3. `scan` emits `ScanCompleted`; `apply` rebuilds grouped projects; the sidebar
-   re-renders. `notify` triggers incremental re-scans.
+   re-renders. `notify` triggers incremental re-scans. The rendered membership
+   is not the scan alone: declared repositories come from the `metadata.json`
+   overlay and are united with the scanned groups on the same key, so a rebuild
+   has a second input that no scan event carries.
 
 ### Open a session into the workspace
 

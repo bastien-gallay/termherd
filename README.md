@@ -143,9 +143,10 @@ list, and widening it is tracked separately.
 Window size and position persist separately to `~/.termherd/window.json` (a
 position left off every connected monitor — e.g. on a screen since unplugged —
 is dropped so the window re-centers instead of opening out of reach), and
-session stars / archives / custom titles to `~/.termherd/metadata.json` (an
-overlay — TermHerd never writes under `~/.claude`). Star (★), archive (⊟) and
-rename (✎) are buttons on each sidebar row.
+session stars / archives / custom titles — and the repositories you added by
+hand — to `~/.termherd/metadata.json` (an overlay — TermHerd never writes under
+`~/.claude`). Star (★), archive (⊟) and rename (✎) are buttons on each sidebar
+row; a hand-added repository also carries a ✕ that takes it back out.
 
 ## Shortcuts
 
@@ -182,7 +183,9 @@ outright, and `terminal.paste_on_right_click` makes a right-click paste into
 the pane under the pointer. Left off, the copy chord reads whatever is
 highlighted on screen. In the sidebar, click a project or session to
 open it; a tab's `×` also closes it. Hovering a tab shows the session's fuller
-description (the same card the sidebar shows).
+description (the same card the sidebar shows). **+ Add a repo** puts a
+repository in the sidebar before it has any session — or drop its folder on the
+window, which does the same thing (a dropped *file* is ignored).
 
 Holding `Ctrl` — or `Cmd`/`Super`, either one, on every platform — underlines
 the URL or **file path** under the pointer, and clicking it opens it. A path
@@ -219,6 +222,7 @@ nothing to configure. It exposes the running workspace:
 | `read_terminal` | one pane's visible text |
 | `screenshot` | the window as a PNG — for what only pixels show |
 | `press_keys` · `run_action` | drive termherd's own interface — chords through the live keymap, or actions by name |
+| `add_repo` · `forget_repo` | put a repository in the sidebar before it has any session, and drop that addition |
 
 The loop that makes it useful is **act → wait → observe**: `run_in_session`,
 then `wait_for_status`, then `read_terminal`. Sessions are addressed by a

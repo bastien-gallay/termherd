@@ -87,7 +87,7 @@ Never under `~/.claude`. Everything it owns lives in `~/.termherd`
 | --- | --- |
 | `~/.termherd/settings.json` | your settings — [reference](../reference/settings.md) |
 | `~/.termherd/window.json` | window size and position |
-| `~/.termherd/metadata.json` | stars, archives, custom session titles |
+| `~/.termherd/metadata.json` | stars, archives, custom session titles, hand-added repositories |
 | `~/.termherd/captures/` | `capture-<ts>.json` / `.png` / `.gif` — see [Capture and record](../workspace/capture.md) |
 
 TermHerd is **single-instance**: an advisory lock file under the system temp

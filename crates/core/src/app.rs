@@ -58,8 +58,9 @@ pub struct App {
     /// User overlay (star / archive / title) per Claude session id
     /// (`F-session-metadata`); persisted to `~/.termherd`.
     pub metadata: HashMap<String, SessionMeta>,
-    /// User overlay (star) per real project path (`F-favorites`, repo-level);
-    /// shares `~/.termherd/metadata.json` with [`Self::metadata`].
+    /// User overlay (star, and whether the repo was added by hand) per real
+    /// project path (`F-favorites` / `F-repo-add`, repo-level); shares
+    /// `~/.termherd/metadata.json` with [`Self::metadata`].
     pub repos: HashMap<String, RepoMeta>,
     /// Terminal font sizing: the configured base plus zoom steps. Private —
     /// the effective size is read through [`Self::font_size`]. See `FontState`.

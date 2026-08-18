@@ -143,8 +143,10 @@ Abbreviated acceptance criteria.
 ### Browser & search
 
 - FR1 — On launch, list every session under `~/.claude/projects`, grouped by
-  the real project path (derived from JSONL `cwd`, worktrees collapsed); no
-  duplicate-group bug (#41/#44 class), pinned by property tests.
+  the real project path (derived from JSONL `cwd`, worktrees collapsed), united
+  with the repositories declared by hand; both sides key by the same rule, which
+  is what preserves the no-duplicate-group clause. No duplicate-group bug
+  (#41/#44 class), pinned by property tests.
 - FR2 — Scanning is off the UI thread; live-updates on fs changes.
 - FR3 — Search over session content, case-insensitive, title-only toggle.
   v1: in-memory over scan digests (their indexed text is capped per

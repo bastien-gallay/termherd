@@ -25,8 +25,8 @@ If you have not installed it yet, see [Installation](./installation.md).
 
 The window opens on the workspace: the **sidebar** on the left, listing every
 Claude session TermHerd found by walking `~/.claude/projects`, grouped by
-project; the **tab strip** across the top; the focused **terminal** filling the
-rest.
+project — plus any repository you added by hand; the **tab strip** across the
+top; the focused **terminal** filling the rest.
 
 Nothing is scanned from your source trees and nothing under `~/.claude` is
 written. A first run on a large history takes a moment to walk the tree — the

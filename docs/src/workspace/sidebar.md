@@ -1,9 +1,10 @@
 # The sidebar: browse, search, star
 
 The sidebar is the session browser. It lists every Claude session TermHerd
-found by walking `~/.claude/projects`, grouped by project, and it refreshes
-live as the filesystem changes — a session started elsewhere appears without a
-restart. Repositories you add by hand sit in the same list.
+found by walking `~/.claude/projects`, grouped by project — together with the
+repositories you added by hand, which need no session to appear. It refreshes
+live as the filesystem changes, so a session started elsewhere shows up without
+a restart.
 
 Toggle it with <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>B</kbd>.
 

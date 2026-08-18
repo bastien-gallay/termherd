@@ -7,6 +7,20 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (a repository in the sidebar, before it has any session)
+
+- A sidebar row is no longer born only from a session. **+ Add a repo** opens
+  the native folder picker, and dropping a folder on the window does the same
+  thing — a dropped *file* is ignored (#279). The row carries the usual `$` and
+  🤖 launch buttons, says `No sessions yet` until it has one, and sorts to the
+  top until then. A ✕ takes it back out; it appears only on rows you added,
+  since a discovered project has no declaration to drop.
+- Hand-added repositories live in `~/.termherd/metadata.json`, beside stars and
+  renames. Nothing is written under `~/.claude`.
+- Over MCP: `add_repo` and `forget_repo`, answering about the sidebar row —
+  membership, not what the window happens to be drawing — and `declared` on
+  each project in `snapshot` and in the ⌘⇧S capture.
+
 ### Changed (clipboard mouse gestures)
 
 - The two classic terminal clipboard conventions are settings now, both off by
