@@ -149,12 +149,13 @@ into its `mcpServers` at spawn (loopback, per-session token) — so it can read
 and drive the workspace it runs in. This is the richer sibling of the capture
 dump above: same `WorkspaceSnapshot` model, live instead of a file.
 
-**Settled.** Eight slices shipped: `list_sessions` + `snapshot` (perception),
-`open_session` / `split_pane` / `focus_pane` / `rename_tab` / `close_pane` /
-`run_in_session` (action), `wait_for_status` + `read_terminal`
+**Settled.** Fifteen tools: `list_sessions` + `snapshot`
+(perception), `open_session` / `split_pane` / `focus_pane` / `rename_tab` /
+`close_pane` / `run_in_session` (action), `wait_for_status` + `read_terminal`
 (synchronisation), `screenshot` (pixels), `press_keys` + `run_action`
-(the app's own keyboard). The loop they exist to serve is
-**act → wait → observe**: `run_in_session` returns immediately, so synchronise
+(the app's own keyboard), `add_repo` + `forget_repo` (membership — what the
+sidebar *contains*, as against what the window draws). The loop they exist to
+serve is **act → wait → observe**: `run_in_session` returns immediately, so synchronise
 with `wait_for_status` and then `read_terminal`. Do **not** poll `snapshot` in
 a loop — it races the transition you are watching for, which is why the wait
 rung exists.
@@ -461,6 +462,27 @@ exists). Do not relax them locally.
   mid-run (see `.wrap.md`): success and vacuity are indistinguishable from the
   outside. Probe with the operation you actually intend to perform, and if that
   is destructive, assert on something the operation *must* have changed.
+- **An unfinished check is not a passing check, and reporting it once is not
+  reading it.** `portable` is the only gate that runs a Windows *behaviour*
+  before merge, and it takes minutes while every other job takes seconds — so
+  the natural moment to look at the checks is the moment it is still pending.
+  A repo-add push was reported that way ("three jobs pending"), nobody went
+  back, and the same Windows failure survived **three** consecutive pushes,
+  each of which read as green in the summary that had been looked at. Poll
+  until the run is `completed`, then read the conclusion; a job list with a
+  `pending` in it says nothing about the branch.
+- **An expectation defined as "whatever the other side said" cannot tell a
+  wrong answer from a wrong question.** Comparing a declaration's key against
+  the walk's own output is the right *shape* — it is what stops the two rules
+  drifting — but it holds only if the fixture the walk answered about is the
+  one the test meant to ask about. Every fixture wrote its transcript as
+  `abc.jsonl`, so the session id was ambiguous across them; the scan keeps both
+  records rather than merging them, both satisfied the lookup, and `find`
+  returned whichever the filesystem enumerated first. A test about one
+  directory was answered about another: correct on APFS, a neighbour's answer
+  on ext4 and on Windows. Two habits close it — make a fixture's identifier
+  unique, and spell the expected value out *beside* the cross-check instead of
+  only comparing the two sides, so a wrong fixture fails on any platform.
 - **A test that claims to be exhaustive is worse than no test when it is not.**
   A hand-written list asserting "this *set* is the contract" reads as a
   guarantee, so nobody re-derives it — where an absent test at least leaves the
