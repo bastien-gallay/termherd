@@ -160,12 +160,14 @@ mod tests {
         let projects = tmp.join("projects").join(folder);
         fs::create_dir_all(&projects).unwrap();
         // The transcript is named after its folder, so the session id is unique
-        // across the fixtures one test writes. The scan keys sessions by that
-        // id: named `abc` alike, two fixtures collided into a single record and
-        // the survivor was whichever the filesystem enumerated last — so a test
-        // asserting about one directory was answered about another. Stable on
-        // APFS, the other way round on ext4 and on Windows, which is why it
-        // read green here and failed in CI on both.
+        // across the fixtures one test writes, and the lookup below can name
+        // the one it wants. Called `abc` alike, every fixture answered the
+        // lookup — the scan keeps both records, it does not merge them, so the
+        // predicate was true of each and `find` returned whichever the
+        // filesystem enumerated first. A test asserting about one directory was
+        // answered about another: the right answer on APFS, a neighbouring
+        // fixture's on ext4 and on Windows, which is why it read green here and
+        // failed in CI on both.
         fs::write(
             projects.join(format!("{folder}.jsonl")),
             format!("{{\"type\":\"user\",\"cwd\":\"{cwd}\",\"message\":\"hi\"}}\n"),
@@ -195,6 +197,9 @@ mod tests {
         let deep = repo.join("crates").join("core");
 
         let walked = walked_key(tmp.path(), "C--proj-crates-core", &as_key(&deep));
+        // Spelled out beside the cross-check: comparing the two sides alone
+        // cannot tell a wrong answer from a wrong fixture.
+        assert_eq!(walked, as_key(&deep), "the walk keys at the subdirectory");
         assert_eq!(normalize_repo_path(&deep).map(|p| as_key(&p)), Some(walked));
         assert_ne!(
             normalize_repo_path(&deep),
@@ -214,6 +219,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let (repo, _) = clone_with_a_worktree(tmp.path());
         let walked = walked_key(tmp.path(), "C--proj", &as_key(&repo));
+        assert_eq!(walked, as_key(&repo), "the walk keys the repo at itself");
 
         let plain = as_key(&repo);
         for spelling in [
