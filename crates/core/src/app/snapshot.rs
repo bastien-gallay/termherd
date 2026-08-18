@@ -76,10 +76,20 @@ impl App {
             .merged_rows()
             .into_iter()
             .filter_map(|(path, sessions)| {
-                // A path hit keeps the group whole (like `filter_projects`);
+                // A path hit keeps the group whole (like `filter_rows`);
                 // otherwise only content/title matches count. Then archived rows
                 // drop unless shown. An empty needle keeps every session.
                 let path_hit = needle.is_empty() || path.to_lowercase().contains(&needle);
+                // The two filters run in the rendering path's order, and the
+                // order is the whole point: the search decides whether the row
+                // matched, the archive knob only decides what it *shows*. Read
+                // off the archived-filtered count, a declared repo whose one
+                // search hit was archived dropped out of the snapshot while the
+                // screen still drew it.
+                let matched = path_hit
+                    || sessions
+                        .iter()
+                        .any(|s| session_matches(s, &needle, titles_only));
                 let session_count = sessions
                     .iter()
                     .filter(|s| path_hit || session_matches(s, &needle, titles_only))
@@ -87,13 +97,12 @@ impl App {
                     .count();
                 // The search applies to a declared repo like any other: it earns
                 // its row by matching, then keeps it by being declared.
-                let matched = path_hit || session_count > 0;
                 (matched && self.sidebar_row_shown(path, session_count)).then(|| {
                     (
                         ProjectSnapshot {
                             path: path.to_owned(),
                             session_count,
-                            collapsed: self.is_collapsed(path),
+                            collapsed: self.sidebar_row_collapsed(path, session_count),
                             declared: self.is_repo_declared(path),
                         },
                         sessions,
@@ -329,6 +338,19 @@ mod tests {
         ]));
         app.apply(Event::DeclareRepo("/fresh".into()));
         app.apply(Event::ToggleRepoStar("/quiet".into()));
+        // A declared repo whose only search hit is *archived*. The two filters
+        // are not interchangeable — the search decides whether the row matched,
+        // the archive knob only what it shows — and reading the match off the
+        // archived-filtered count dropped this row from the snapshot while the
+        // screen went on drawing it.
+        app.apply(Event::ScanCompleted(vec![
+            at("s0", "/busy", 300, "the newest one"),
+            at("s1", "/busy", 10, "an elderly one"),
+            at("s2", "/quiet", 200, "an elderly one"),
+            at("s3", "/dusty", 100, "an elderly one"),
+        ]));
+        app.apply(Event::DeclareRepo("/dusty".into()));
+        app.apply(Event::ToggleArchive("s3".into()));
 
         // "elderly" excludes `/busy`'s leading session, so a key taken from the
         // filtered set would reorder the two — on one side and not the other.
@@ -352,6 +374,36 @@ mod tests {
                 .collect();
             assert_eq!(snapped, rendered, "search {search:?}");
         }
+    }
+
+    #[test]
+    fn an_empty_rows_fold_is_reported_as_the_screen_draws_it() {
+        // A row with no session list cannot be folded, and the renderer draws
+        // it expanded. Masking that in the view alone left the snapshot
+        // reporting a fold the screen contradicted.
+        let mut app = App::new();
+        app.apply(Event::DeclareRepo("/fresh".into()));
+        app.apply(Event::ToggleCollapsed("/fresh".into()));
+        assert!(app.is_collapsed("/fresh"), "the raw flag is set");
+
+        let collapsed = |app: &App| {
+            app.snapshot(
+                &only_sections(&[Section::Sidebar]),
+                &SnapshotInputs::default(),
+            )
+            .sidebar
+            .expect("sidebar")
+            .projects
+            .iter()
+            .find(|p| p.path == "/fresh")
+            .expect("the declared row")
+            .collapsed
+        };
+        assert!(!collapsed(&app), "nothing to fold, so nothing is folded");
+
+        // The day it gains a session there *is* a list, and the fold applies.
+        app.apply(Event::ScanCompleted(vec![record("s1", "/fresh", "work")]));
+        assert!(collapsed(&app));
     }
 
     #[test]

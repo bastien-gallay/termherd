@@ -49,10 +49,36 @@ pub fn repo_root(start: &Path) -> Option<PathBuf> {
 ///   under a path the scan never produces for it.
 #[must_use]
 pub fn sidebar_key(dir: &str) -> String {
-    match collapse_worktree(dir) {
+    let dir = lexical(dir);
+    match collapse_worktree(&dir) {
         Some(parent) if Path::new(parent).exists() => parent.to_owned(),
-        _ => dir.to_owned(),
+        _ => dir,
     }
+}
+
+/// The one spelling of an absolute path: re-joined from its components, which
+/// drops a trailing separator and any `.`, and writes the platform's own
+/// separator (so `C:/dev/app` and `C:\dev\app` are one key on Windows).
+///
+/// This is *not* the resolution `sidebar_key` refuses. Nothing here touches the
+/// disk and no symlink is followed: two spellings of one path become one
+/// string, which is exactly what keeps a repository on one row. A CLI records
+/// the clean spelling, so this only ever moves a hand-typed path *towards* what
+/// the walk emits — and a hand-typed `~/proj/` was otherwise a second,
+/// permanent row that `forget_repo` could not remove under the other spelling.
+///
+/// `..` is deliberately left alone: removing it lexically is wrong the moment a
+/// symlink is in the path, which is the same trap `canonicalize` was removed
+/// for. A relative path is returned untouched — it is rejected upstream.
+fn lexical(dir: &str) -> String {
+    let path = Path::new(dir);
+    if !path.is_absolute() {
+        return dir.to_owned();
+    }
+    path.components()
+        .collect::<PathBuf>()
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// The sidebar key for a path the user picked or dropped (`F-repo-add`).
@@ -166,6 +192,31 @@ mod tests {
             Some(repo.clone()),
             "climbing to the repo root is what produced the duplicate row"
         );
+    }
+
+    #[test]
+    fn two_spellings_of_one_directory_are_one_key() {
+        // A picker cannot produce these, an MCP caller and a hand-typed path
+        // can: a trailing separator, a `.` component, or forward slashes on
+        // Windows. Each was a key the walk can never emit — so a second,
+        // permanent row that `forget_repo` could not reach under the other
+        // spelling. Built as strings deliberately: `PathBuf::join` normalises
+        // them away, which is why the sibling tests could not see this.
+        let tmp = tempfile::tempdir().unwrap();
+        let (repo, _) = clone_with_a_worktree(tmp.path());
+        let walked = walked_key(tmp.path(), "C--proj", &as_key(&repo));
+
+        let plain = as_key(&repo);
+        for spelling in [
+            format!("{plain}/"),
+            format!("{plain}/."),
+            format!("{plain}/./"),
+        ] {
+            let key = normalize_repo_path(Path::new(&spelling))
+                .map(|p| as_key(&p))
+                .unwrap_or_else(|| panic!("{spelling} exists"));
+            assert_eq!(key, walked, "spelling {spelling:?} must not earn a row");
+        }
     }
 
     // The symlink case lives in `tests/symlinked_repo_key.rs`: it needs an

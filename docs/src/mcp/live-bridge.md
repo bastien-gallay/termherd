@@ -66,13 +66,20 @@ they add four fields:
 | `session_count` | sessions on that row right now |
 | `in_sidebar` | whether a row is there at all |
 
+The last two report **membership**, not what the window happens to be drawing:
+a search left in the box, or the archived filter, changes neither. Otherwise a
+successful `add_repo` would read back as a failure for no reason the caller
+could see.
+
 `repo_path` is the one to keep. `add_repo` files a path by **exactly the rule
 the scan uses** for a session's working directory — a worktree collapses onto
 its main checkout, a file becomes its parent directory, everything else is kept
-as given (symlinks included, and *not* climbed to a repository root). That
-agreement is what stops one repository from occupying two rows, so address the
-row afterwards with what came back, not with what you sent. A path that does
-not exist, or a relative one, is rejected.
+as given (symlinks included, and *not* climbed to a repository root). Two
+spellings of one directory are one key: a trailing slash, a `./`, and forward
+slashes on Windows all normalise away, since none of them is a spelling the
+scan can produce. That agreement is what stops one repository from occupying
+two rows, so address the row afterwards with what came back, not with what you
+sent. A path that does not exist, or a relative one, is rejected.
 
 `forget_repo` is the asymmetric one: forgetting a repository that was never
 added is **not** an error, and forgetting one the scan still reports leaves the

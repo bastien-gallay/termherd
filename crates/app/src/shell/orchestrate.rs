@@ -60,24 +60,30 @@ impl Shell {
     /// Drop a repo's declaration. Unlike declaring, an unknown path is not an
     /// error: the caller asked for an absence and gets one. The outcome says
     /// whether a row survived on its sessions.
+    ///
+    /// A path that no longer exists cannot be normalised against the disk, but
+    /// it still gets the textual half of the rule — a worktree deleted after it
+    /// was declared is filed under its main checkout, and forgetting the raw
+    /// path would remove nothing while reporting success.
     fn act_forget_repo(&mut self, path: &str) -> (ActionOutcome, Task<Message>) {
-        let key = termherd_scan::normalize_repo_path(std::path::Path::new(path))
-            .map_or_else(|| path.to_owned(), |p| p.display().to_string());
+        let key = termherd_scan::normalize_repo_path(std::path::Path::new(path)).map_or_else(
+            || termherd_scan::sidebar_key(path),
+            |p| p.display().to_string(),
+        );
         let task = self.forget_repo_key(&key, RepoGesture::Mcp);
         (self.applied().with_repo(self.repo_outcome(&key)), task)
     }
 
-    /// The sidebar row for `key` as it stands now.
+    /// The sidebar row for `key` as it stands now — **membership**, not what
+    /// the screen happens to be showing. Read off the rendered list, a search
+    /// the user had left in the box (or the archive knob) reported a successful
+    /// `add_repo` back to the agent as a failure.
     fn repo_outcome(&self, key: &str) -> RepoOutcome {
-        let row = self
-            .core
-            .visible_projects()
-            .into_iter()
-            .find(|group| group.path == key);
+        let row = self.core.sidebar_row(key);
         RepoOutcome {
             path: key.to_owned(),
             declared: self.core.is_repo_declared(key),
-            session_count: row.as_ref().map_or(0, |group| group.sessions.len()),
+            session_count: row.unwrap_or(0),
             visible: row.is_some(),
         }
     }

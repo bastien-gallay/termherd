@@ -1961,6 +1961,68 @@ mod key_routing {
     }
 
     #[test]
+    fn a_repo_answer_reports_membership_not_what_the_search_box_shows() {
+        let (mut shell, _pty) = shell_with_terminal();
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = std::fs::canonicalize(tmp.path())
+            .unwrap()
+            .display()
+            .to_string();
+        // A search the user left in the box, matching nothing about this repo.
+        shell
+            .core
+            .apply(termherd_core::Event::SearchChanged("zzz-no-match".into()));
+
+        let (outcome, _task) =
+            shell.perform_action(BridgeAction::DeclareRepo { path: repo.clone() });
+        let answer = outcome.repo.expect("a repo action answers about the row");
+        assert!(
+            answer.visible,
+            "the row is in the sidebar; a filter hiding it is not a failed add"
+        );
+        assert!(answer.declared);
+
+        // And with sessions, the count is the row's own — not the filtered one.
+        shell
+            .core
+            .apply(termherd_core::Event::ScanCompleted(vec![scan_record(
+                "s1", &repo,
+            )]));
+        let (outcome, _task) = shell.perform_action(BridgeAction::DeclareRepo { path: repo });
+        let answer = outcome.repo.expect("an answer");
+        assert_eq!(answer.session_count, 1, "the search does not decount it");
+    }
+
+    #[test]
+    fn forgetting_a_deleted_worktree_removes_the_row_it_was_filed_under() {
+        let (mut shell, _pty) = shell_with_terminal();
+        let tmp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let repo = root.join("proj");
+        // The worktree layout `collapse_worktree` recognises textually.
+        let worktree = repo.join(".worktrees").join("feature");
+        std::fs::create_dir_all(&worktree).unwrap();
+
+        let key = repo.display().to_string();
+        let _ = shell.perform_action(BridgeAction::DeclareRepo {
+            path: worktree.display().to_string(),
+        });
+        assert!(shell.core.is_repo_declared(&key));
+
+        // The worktree is deleted before the caller gets round to forgetting it,
+        // so the path can no longer be normalised against the disk.
+        std::fs::remove_dir_all(repo.join(".worktrees")).unwrap();
+        let (outcome, _task) = shell.perform_action(BridgeAction::ForgetRepo {
+            path: worktree.display().to_string(),
+        });
+        assert!(
+            !shell.core.is_repo_declared(&key),
+            "the textual half of the rule still applies, so the row goes"
+        );
+        assert!(!outcome.repo.expect("an answer").declared);
+    }
+
+    #[test]
     fn close_action_closes_a_lone_pane_tab_and_kills_its_pty() {
         let (mut shell, pty) = shell_with_terminal();
         assert_eq!(shell.core.workspace.tabs.len(), 1);

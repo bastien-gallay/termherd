@@ -258,11 +258,14 @@ impl Shell {
     ) -> Element<'_, Message> {
         // A repo declared by hand and not yet used has nothing to fold and
         // nothing to list: its row exists to be launched from (`F-repo-add`).
-        // "Not yet used" is asked of the scan, not of the filtered group — a
-        // repo whose every session is archived has a history, and saying it has
-        // none would be a lie the user can act on.
-        let empty = group.sessions.is_empty() && !self.core.repo_has_sessions(&group.path);
-        let collapsed = self.core.is_collapsed(&group.path) && !empty;
+        // Both predicates live in `core`, so the snapshot reports the fold the
+        // screen is drawing rather than the raw flag behind it.
+        let empty = self
+            .core
+            .sidebar_row_empty(&group.path, group.sessions.len());
+        let collapsed = self
+            .core
+            .sidebar_row_collapsed(&group.path, group.sessions.len());
         // The disclosure triangle and the name both fold the session list —
         // a tree header should fold, not launch. Launching moved
         // to two explicit buttons beside it: `$` opens a plain shell, 🤖 a
@@ -281,11 +284,16 @@ impl Shell {
             .on_press(Message::ToggleRepoStar(group.path.clone()))
             .style(button::text)
             .padding(0);
-        let name = button(text(project_label(&group.path).to_owned()).size(14))
-            .on_press(Message::ToggleCollapsed(group.path.clone()))
+        let mut name = button(text(project_label(&group.path).to_owned()).size(14))
             .style(button::text)
             .padding(0)
             .width(Fill);
+        // An empty row has no list to fold, so the click is not merely
+        // ineffective — it would store a fold nothing shows, to surface the day
+        // the repo gains its first session.
+        if !empty {
+            name = name.on_press(Message::ToggleCollapsed(group.path.clone()));
+        }
         let launch_shell = launch_button(
             "$",
             strings::SIDEBAR_LAUNCH_SHELL,

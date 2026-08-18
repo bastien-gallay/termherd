@@ -630,6 +630,24 @@ pair, and a test walks four searches asserting the snapshot's rows *are* the
 rendered ones — with distinct mtimes, without which every ordering key is equal
 and that assertion cannot fail.
 
+The shared predicate stopped one seam short in four places, which a second
+review caught, and the four are one shape: a rule the sidebar applies, restated
+or skipped by whoever reads it next. The MCP outcome answered off the *rendered*
+list, so a search left in the search box reported a successful `add_repo` as a
+failure. The snapshot decided "did this row match" from a count the archive
+filter had already thinned, so a declared repo whose only hit was archived
+vanished from it while the screen drew it. The fold was masked in the view
+alone, so an empty row reported a fold the screen contradicted and went on
+storing one invisibly. And the key rule normalised no spelling, so a trailing
+slash — which a picker cannot produce and a caller can — was a second permanent
+row that `forget_repo` could not reach.
+
+That last one is the same lesson as the first two normalisation mistakes,
+arrived at from the opposite side: `canonicalize` was wrong because the scan
+cannot apply it, and lexical folding is right because the scan's own producer
+already has. The test that missed it built its paths with `PathBuf::join`,
+which normalises them away before the assertion ever runs.
+
 The row order is keyed on the **unfiltered** sessions, which review also
 caught: taken from the filtered set, typing in the search box reordered the
 projects under the cursor, and a repo whose sessions were merely all archived

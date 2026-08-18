@@ -114,6 +114,45 @@ impl App {
         )
     }
 
+    /// Whether a row has nothing to fold: no session shown *and* none in the
+    /// scan at all, which is a declaration waiting for its first session
+    /// (`F-repo-add`). A repo whose every session is merely archived has a
+    /// history, and calling it empty would be a lie the user can act on.
+    #[must_use]
+    pub fn sidebar_row_empty(&self, path: &str, shown_sessions: usize) -> bool {
+        shown_sessions == 0 && !self.repo_has_sessions(path)
+    }
+
+    /// A row's fold state **as it is presented**: an empty row has no session
+    /// list, so it cannot be folded whatever the stored flag says.
+    ///
+    /// Asked here by the renderer and the snapshot alike. Masked in the view
+    /// alone, the snapshot reported a fold the screen contradicted, and the
+    /// flag went on being toggled invisibly — to surface the day the repo
+    /// gained its first session.
+    #[must_use]
+    pub fn sidebar_row_collapsed(&self, path: &str, shown_sessions: usize) -> bool {
+        self.is_collapsed(path) && !self.sidebar_row_empty(path, shown_sessions)
+    }
+
+    /// The row for `path` as **membership** sees it — the scan united with the
+    /// declarations — carrying its unfiltered session count. `None` when no row
+    /// exists at all.
+    ///
+    /// Deliberately blind to the search box and the archive knob: this answers
+    /// "is this repository in the sidebar", which is what an MCP caller asks
+    /// after adding one. Read off the filtered list, a search the user happened
+    /// to leave in the box reported a successful `add_repo` as a failure.
+    #[must_use]
+    pub fn sidebar_row(&self, path: &str) -> Option<usize> {
+        let sessions = self
+            .merged_rows()
+            .into_iter()
+            .find(|(row, _)| *row == path)
+            .map(|(_, sessions)| sessions.len())?;
+        self.sidebar_row_shown(path, sessions).then_some(sessions)
+    }
+
     /// Whether the scan reports any session at all for `path`, archived or not
     /// — what tells "added, never used" apart from "everything is filtered out"
     /// for a row the filters emptied.
@@ -154,7 +193,10 @@ impl App {
         // list without rearranging it. Stable, so equal keys keep the path order
         // `group_projects` gave them.
         let unfiltered: HashMap<&str, &[SessionRecord]> = rows.iter().copied().collect();
-        groups.sort_by_key(|group| {
+        // Cached: the key costs a map lookup plus a scan of the row's sessions,
+        // and this runs on every frame — `sort_by_key` would pay it per
+        // comparison rather than per row.
+        groups.sort_by_cached_key(|group| {
             let sessions = unfiltered
                 .get(group.path.as_str())
                 .copied()
