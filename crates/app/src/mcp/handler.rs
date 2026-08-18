@@ -234,6 +234,42 @@ impl TermherdMcp {
         .await
     }
 
+    /// Add a repo to the sidebar, before it has any session. → `add_repo`.
+    #[tool(
+        name = "add_repo",
+        description = "Add the repository at `path` to the sidebar, so it can be \
+                       launched from before it has any Claude session. `path` is \
+                       filed by the same rule the scan uses for a session's cwd: \
+                       a git worktree collapses onto its main checkout, a file \
+                       becomes its parent directory, anything else is kept as \
+                       given — symlinks included, and NOT climbed to a repository \
+                       root, so pass the directory you want the row for. The key \
+                       actually kept comes back as `repo_path`; address the row \
+                       with that, not with what you sent. A path that does not \
+                       exist, or a relative one, is rejected."
+    )]
+    async fn add_repo(
+        &self,
+        Parameters(args): Parameters<RepoArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.act(Action::DeclareRepo { path: args.path }).await
+    }
+
+    /// Drop a repo's declaration. → `forget_repo`.
+    #[tool(
+        name = "forget_repo",
+        description = "Remove a hand-added repository from the sidebar. The row \
+                       survives if the scan still reports sessions for it — \
+                       `in_sidebar` says which happened, and `session_count` why. \
+                       Forgetting a repo that was never added is not an error."
+    )]
+    async fn forget_repo(
+        &self,
+        Parameters(args): Parameters<RepoArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.act(Action::ForgetRepo { path: args.path }).await
+    }
+
     /// Close a pane; a lone pane closes its whole tab. → `close_pane`.
     #[tool(
         name = "close_pane",
@@ -583,7 +619,17 @@ impl TermherdMcp {
         if let Some(reason) = outcome.error {
             return Err(ErrorData::invalid_params(reason, None));
         }
-        let value = serde_json::json!({ "focused_handle": outcome.focused });
+        let mut value = serde_json::json!({ "focused_handle": outcome.focused });
+        // The repo actions answer about a sidebar row, not about focus; the
+        // fields ride alongside rather than in a second reply kind.
+        if let Some(repo) = outcome.repo
+            && let Some(object) = value.as_object_mut()
+        {
+            object.insert("repo_path".into(), repo.path.into());
+            object.insert("declared".into(), repo.declared.into());
+            object.insert("session_count".into(), repo.session_count.into());
+            object.insert("in_sidebar".into(), repo.visible.into());
+        }
         Ok(CallToolResult::structured(value))
     }
 }
@@ -739,6 +785,16 @@ struct RenameArgs {
     tab: usize,
     /// The new manual title; blank reverts to the derived title.
     title: String,
+}
+
+/// Arguments for `add_repo` and `forget_repo`.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
+struct RepoArgs {
+    /// An absolute directory. Filed by the scan's own key rule: a worktree
+    /// collapses onto its main checkout, a file becomes its parent, anything
+    /// else is kept as given — never climbed to a repository root.
+    path: String,
 }
 
 /// Arguments for `close_pane`.

@@ -33,14 +33,20 @@ impl SessionMeta {
 pub struct RepoMeta {
     /// Pinned to the top of the sidebar.
     pub starred: bool,
+    /// Added to the sidebar by hand (`F-repo-add`) rather than discovered by the
+    /// scan. Orthogonal to [`Self::starred`] — all four combinations mean
+    /// something — and it outlives the repo's first session.
+    pub declared: bool,
 }
 
 impl RepoMeta {
     /// True when nothing is set — such entries are dropped rather than persisted
-    /// as noise, mirroring [`SessionMeta::is_default`].
+    /// as noise, mirroring [`SessionMeta::is_default`]. A declaration counts:
+    /// were it left out here, declaring a repo would drop its own entry on the
+    /// very save meant to record it, and the repo would vanish at restart.
     #[must_use]
     pub fn is_default(&self) -> bool {
-        !self.starred
+        !self.starred && !self.declared
     }
 }
 

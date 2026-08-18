@@ -48,7 +48,7 @@ use cache::ScanCache;
 use walk::scan_root;
 
 pub use paths::FsPathResolver;
-pub use repo::repo_root;
+pub use repo::{normalize_repo_path, repo_root, sidebar_key};
 pub use watch::{WatchHandle, watch_changes};
 
 /// Scanner over a projects root (normally `~/.claude/projects`).

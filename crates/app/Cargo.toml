@@ -115,6 +115,20 @@ uuid = { version = "1", features = ["v4"] }
 # tool encodes its PNG bytes with it. Already in the tree via rmcp's own wire
 # codec; declared here because this crate calls it directly.
 base64 = "0.22"
+# Native folder picker for "add a repo to the sidebar". `xdg-portal` instead of
+# the default `gtk3` backend so a Linux build needs no GTK development
+# libraries — the portal is what a sandboxed desktop offers anyway. Its async
+# dialog owns the main-thread hop macOS and Windows need, and carries no async
+# runtime of its own, which is what lets it be polled by an `iced::Task`.
+#
+# `wayland` is listed explicitly because `default-features = false` drops it
+# too: without it the portal cannot be handed a parent surface, and the dialog
+# opens unparented — floating free of the window that asked for it, and not
+# modal to it.
+rfd = { version = "0.17.2", default-features = false, features = [
+    "wayland",
+    "xdg-portal",
+] }
 
 [dev-dependencies]
 # Temp dirs for the atomic-write round-trip tests.

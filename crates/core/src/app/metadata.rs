@@ -58,6 +58,14 @@ impl App {
         self.repos.get(path).is_some_and(|m| m.starred)
     }
 
+    /// Whether a project (by real path) was added to the sidebar by hand
+    /// (`F-repo-add`). True whether or not the scan also reports sessions for
+    /// it — a declaration is not undone by a discovery.
+    #[must_use]
+    pub fn is_repo_declared(&self, path: &str) -> bool {
+        self.repos.get(path).is_some_and(|m| m.declared)
+    }
+
     /// The live session currently resuming the Claude session `claude_id`, if
     /// one is open. Lets the shell re-focus an existing terminal when its
     /// sidebar row is clicked again, rather than spawning a duplicate (FR4).

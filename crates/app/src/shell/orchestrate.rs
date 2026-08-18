@@ -15,8 +15,11 @@ use iced::Task;
 use termherd_core::workspace::{SessionId, SplitDir};
 use termherd_core::{Event, Launch};
 
-use super::bridge::{Action, ActionOutcome, Press, PressOutcome, PressStep, SessionKind};
+use super::bridge::{
+    Action, ActionOutcome, Press, PressOutcome, PressStep, RepoOutcome, SessionKind,
+};
 use super::input::event_of;
+use super::repos::RepoGesture;
 use super::routing::KeyVerdict;
 use super::{Focus, Message, Shell, home_dir};
 
@@ -33,6 +36,55 @@ impl Shell {
             Action::Rename { tab, title } => self.act_rename(tab, title),
             Action::Close { pane } => self.act_close(pane),
             Action::Run { session, bytes } => self.act_run(session, bytes),
+            Action::DeclareRepo { path } => self.act_declare_repo(&path),
+            Action::ForgetRepo { path } => self.act_forget_repo(&path),
+        }
+    }
+
+    /// Add a repo to the sidebar. The path is normalised first — the caller may
+    /// have passed a subdirectory or a worktree and cannot know the key the
+    /// sidebar uses — and a path that does not exist is rejected before
+    /// anything applies, since its launch buttons could not work.
+    fn act_declare_repo(&mut self, path: &str) -> (ActionOutcome, Task<Message>) {
+        let Some(key) = termherd_scan::normalize_repo_path(std::path::Path::new(path)) else {
+            return (
+                ActionOutcome::rejected(format!("no such directory: {path}")),
+                Task::none(),
+            );
+        };
+        let key = key.display().to_string();
+        let task = self.declare_repo_key(&key, RepoGesture::Mcp);
+        (self.applied().with_repo(self.repo_outcome(&key)), task)
+    }
+
+    /// Drop a repo's declaration. Unlike declaring, an unknown path is not an
+    /// error: the caller asked for an absence and gets one. The outcome says
+    /// whether a row survived on its sessions.
+    ///
+    /// A path that no longer exists cannot be normalised against the disk, but
+    /// it still gets the textual half of the rule — a worktree deleted after it
+    /// was declared is filed under its main checkout, and forgetting the raw
+    /// path would remove nothing while reporting success.
+    fn act_forget_repo(&mut self, path: &str) -> (ActionOutcome, Task<Message>) {
+        let key = termherd_scan::normalize_repo_path(std::path::Path::new(path)).map_or_else(
+            || termherd_scan::sidebar_key(path),
+            |p| p.display().to_string(),
+        );
+        let task = self.forget_repo_key(&key, RepoGesture::Mcp);
+        (self.applied().with_repo(self.repo_outcome(&key)), task)
+    }
+
+    /// The sidebar row for `key` as it stands now — **membership**, not what
+    /// the screen happens to be showing. Read off the rendered list, a search
+    /// the user had left in the box (or the archive knob) reported a successful
+    /// `add_repo` back to the agent as a failure.
+    fn repo_outcome(&self, key: &str) -> RepoOutcome {
+        let row = self.core.sidebar_row(key);
+        RepoOutcome {
+            path: key.to_owned(),
+            declared: self.core.is_repo_declared(key),
+            session_count: row.unwrap_or(0),
+            visible: row.is_some(),
         }
     }
 

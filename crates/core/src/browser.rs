@@ -34,8 +34,16 @@ impl ProjectGroup {
     /// When this project last saw activity (its freshest session).
     #[must_use]
     pub fn last_activity(&self) -> Option<SystemTime> {
-        self.sessions.iter().filter_map(|s| s.modified).max()
+        last_activity(&self.sessions)
     }
+}
+
+/// When a set of sessions last saw activity. Free-standing so the sidebar can
+/// ask it of a borrowed slice — the snapshot orders rows without materialising
+/// the groups the rendering path clones.
+#[must_use]
+pub fn last_activity(sessions: &[SessionRecord]) -> Option<SystemTime> {
+    sessions.iter().filter_map(|s| s.modified).max()
 }
 
 /// A compact, language-neutral relative age — `now`, `5m`, `3h`, `2d`, `4w`,
@@ -102,28 +110,31 @@ pub fn group_projects(records: Vec<SessionRecord>) -> Vec<ProjectGroup> {
     groups
 }
 
-/// Filter groups for the search box (FR3): case-insensitive, matching the
+/// Filter rows for the search box (FR3): case-insensitive, matching the
 /// project path or, per session, the display title — plus summary, slug and
-/// indexed text unless `titles_only`. Groups keep their order; a group
-/// whose path matches is kept whole.
+/// indexed text unless `titles_only`. Rows keep their order; a row whose path
+/// matches is kept whole.
+///
+/// Takes **borrowed** rows, which is what the sidebar actually holds once the
+/// scan's groups are united with the hand-added repos. Owning the union first
+/// would clone every digest in the browser on **every frame**, only to clone
+/// the survivors again here.
 #[must_use]
-pub fn filter_projects(
-    groups: &[ProjectGroup],
+pub fn filter_rows(
+    rows: &[(&str, &[SessionRecord])],
     query: &str,
     titles_only: bool,
 ) -> Vec<ProjectGroup> {
     let needle = query.trim().to_lowercase();
-    if needle.is_empty() {
-        return groups.to_vec();
-    }
-    groups
-        .iter()
-        .filter_map(|group| {
-            if group.path.to_lowercase().contains(&needle) {
-                return Some(group.clone());
+    rows.iter()
+        .filter_map(|(path, sessions)| {
+            if needle.is_empty() || path.to_lowercase().contains(&needle) {
+                return Some(ProjectGroup {
+                    path: (*path).to_owned(),
+                    sessions: sessions.to_vec(),
+                });
             }
-            let sessions: Vec<SessionRecord> = group
-                .sessions
+            let sessions: Vec<SessionRecord> = sessions
                 .iter()
                 .filter(|s| session_matches(s, &needle, titles_only))
                 .cloned()
@@ -132,7 +143,7 @@ pub fn filter_projects(
                 None
             } else {
                 Some(ProjectGroup {
-                    path: group.path.clone(),
+                    path: (*path).to_owned(),
                     sessions,
                 })
             }
@@ -247,6 +258,15 @@ mod tests {
     use proptest::prelude::*;
     use std::time::{Duration, UNIX_EPOCH};
 
+    /// Borrow owned groups as the rows `filter_rows` takes — the shape the
+    /// sidebar builds from the scan united with the declared repos.
+    fn rows_of(groups: &[ProjectGroup]) -> Vec<(&str, &[SessionRecord])> {
+        groups
+            .iter()
+            .map(|group| (group.path.as_str(), group.sessions.as_slice()))
+            .collect()
+    }
+
     fn record(project: &str, id: &str, age_secs: u64) -> SessionRecord {
         SessionRecord {
             session_id: id.to_owned(),
@@ -315,7 +335,7 @@ mod tests {
     #[test]
     fn empty_query_keeps_everything() {
         let groups = group_projects(vec![record("/a", "s1", 1)]);
-        assert_eq!(filter_projects(&groups, "  ", false), groups);
+        assert_eq!(filter_rows(&rows_of(&groups), "  ", false), groups);
     }
 
     #[test]
@@ -324,13 +344,13 @@ mod tests {
         r.digest.text_content = "Fix the Login Bug\n".into();
         let groups = group_projects(vec![r, record("/b", "s2", 2)]);
 
-        let hits = filter_projects(&groups, "lOgIn", false);
+        let hits = filter_rows(&rows_of(&groups), "lOgIn", false);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].path, "/a");
         // Content does not match in titles-only mode…
-        assert!(filter_projects(&groups, "login", true).is_empty());
+        assert!(filter_rows(&rows_of(&groups), "login", true).is_empty());
         // …but titles still do ("prompt s2" is the display title).
-        let hits = filter_projects(&groups, "PROMPT S2", true);
+        let hits = filter_rows(&rows_of(&groups), "PROMPT S2", true);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].path, "/b");
     }
@@ -341,7 +361,7 @@ mod tests {
             record("/apps/web", "s1", 1),
             record("/apps/web", "s2", 2),
         ]);
-        let hits = filter_projects(&groups, "web", true);
+        let hits = filter_rows(&rows_of(&groups), "web", true);
         assert_eq!(hits[0].sessions.len(), 2);
     }
 
@@ -362,7 +382,7 @@ mod tests {
         let mut hit = record("/a", "findme", 1);
         hit.digest.summary = "the needle".into();
         let groups = group_projects(vec![hit, record("/a", "other", 2)]);
-        let filtered = filter_projects(&groups, "needle", false);
+        let filtered = filter_rows(&rows_of(&groups), "needle", false);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].sessions.len(), 1);
         assert_eq!(filtered[0].sessions[0].session_id, "findme");

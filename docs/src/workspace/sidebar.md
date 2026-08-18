@@ -3,12 +3,13 @@
 The sidebar is the session browser. It lists every Claude session TermHerd
 found by walking `~/.claude/projects`, grouped by project, and it refreshes
 live as the filesystem changes — a session started elsewhere appears without a
-restart.
+restart. Repositories you add by hand sit in the same list.
 
 Toggle it with <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>B</kbd>.
 
 ```text
 ┌──────────────────────────┐
+│ ◀ Hide          + Add a repo │  ← add a folder the scan cannot know about
 │ Search…                  │  ← Cmd/Ctrl+F focuses this
 │ ☐ Titles only            │
 │ ☐ Show archived          │
@@ -16,6 +17,8 @@ Toggle it with <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>B</kbd>.
 │ ★ Favorites              │
 │   my-app · fix the race  │
 ├──────────────────────────┤
+│   new-repo     $  🤖  ✕  │  ← added by hand, no sessions yet
+│     No sessions yet …    │
 │ ▾ my-app          $  🤖  │  ← launch a shell / a fresh Claude session
 │     fix the race  ★ ⊟ ✎  │
 │     add the cache ★ ⊟ ✎  │
@@ -39,6 +42,40 @@ two actions are on the keyboard as <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>T</kbd>
 and <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>T</kbd>, which use the
 *focused* session's
 directory instead.
+
+## Adding a repository
+
+A project only appears once it has a Claude session, so a repository you have
+never opened Claude in is invisible — including the one you are about to start
+work in. **+ Add a repo** puts it there anyway: pick a folder, or **drop one on
+the window**. Both do the same thing.
+
+Drop a **folder**, not a file: a dropped file is ignored, so dragging one onto
+a terminal never quietly adds its directory.
+
+The row that appears carries the same `$` and 🤖 buttons as any other, and says
+`No sessions yet` until it has one. When it does, it becomes an ordinary
+project row — there is no second entry.
+
+An added repository sorts to the top of the list until its first session, then
+takes its place by recency like everything else. A **✕** on its row removes it;
+the button only appears on rows you added, since a discovered project has no
+declaration to drop. Removing a repository that has since gained sessions drops
+only the addition — the project stays, because the scan still finds it.
+
+What you pick is not always what is stored, but it is filed by **exactly the
+rule the scan uses** for a session's working directory — that agreement is what
+keeps one repository on one row. A git worktree collapses onto its main
+checkout; a file becomes the folder holding it; everything else is stored as
+given, symlinks and all.
+
+One consequence is worth knowing: a **subdirectory is not climbed**. Add
+`~/dev/app/crates/core` and you get a row for that subdirectory, not for
+`~/dev/app` — because a Claude session started there is filed the same way.
+Add the directory you actually want the row for.
+
+Additions live in `~/.termherd/metadata.json`, beside stars and renames.
+Nothing is written under `~/.claude`.
 
 Hovering a session shows a card with its fuller description — relative last
 activity and message count (`3h ago · 214 messages`). The same card is what a

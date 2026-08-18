@@ -126,6 +126,15 @@ pub enum Event {
     ToggleStar(String),
     /// Toggle a repo's star, by real project path (`F-favorites`, repo-level).
     ToggleRepoStar(String),
+    /// Add a repo to the sidebar by hand (`F-repo-add`), by real project path.
+    /// The path arrives already normalised by the adapter, exactly as a scanned
+    /// `project_path` does — so a declaration and a discovery of the same repo
+    /// land on one key.
+    DeclareRepo(String),
+    /// Drop a hand-added repo's declaration. The group survives if the scan
+    /// still reports sessions for it; it disappears only when nothing else
+    /// justified its presence.
+    ForgetRepo(String),
     /// Toggle a session's archived flag, by Claude session id.
     ToggleArchive(String),
     /// Set (or clear, when empty) a session's custom title.

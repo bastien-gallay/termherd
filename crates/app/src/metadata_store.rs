@@ -30,6 +30,8 @@ struct MetaDto {
 struct RepoDto {
     #[serde(default, skip_serializing_if = "is_false")]
     starred: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    declared: bool,
 }
 
 /// On-disk shape of the whole file: the two keyings under named wrappers.
@@ -102,7 +104,15 @@ fn from_dto(dto: OverlayDto) -> Overlay {
         repos: dto
             .repos
             .into_iter()
-            .map(|(path, m)| (path, RepoMeta { starred: m.starred }))
+            .map(|(path, m)| {
+                (
+                    path,
+                    RepoMeta {
+                        starred: m.starred,
+                        declared: m.declared,
+                    },
+                )
+            })
             .collect(),
     }
 }
@@ -126,7 +136,15 @@ fn to_dto(overlay: &Overlay) -> OverlayDto {
         repos: overlay
             .repos
             .iter()
-            .map(|(path, m)| (path.clone(), RepoDto { starred: m.starred }))
+            .map(|(path, m)| {
+                (
+                    path.clone(),
+                    RepoDto {
+                        starred: m.starred,
+                        declared: m.declared,
+                    },
+                )
+            })
             .collect(),
     }
 }
@@ -187,13 +205,21 @@ mod tests {
                 ..Default::default()
             },
         );
-        overlay
-            .repos
-            .insert("/p".into(), RepoMeta { starred: true });
+        overlay.repos.insert(
+            "/p".into(),
+            RepoMeta {
+                starred: true,
+                declared: true,
+            },
+        );
         let json = serde_json::to_string(&to_dto(&overlay)).unwrap();
         let back = parse(&json).unwrap();
         assert!(back.sessions["s1"].starred);
         assert!(back.repos["/p"].starred);
+        assert!(
+            back.repos["/p"].declared,
+            "a hand-declared repo must survive the round trip, or it is gone at restart"
+        );
     }
 
     #[test]
