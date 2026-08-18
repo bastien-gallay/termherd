@@ -818,7 +818,7 @@ the launcher — was the one process with no way to speak to it. `press_keys`,
 `screenshot` and `wait_for_status` were all there, all unreachable.
 
 So the missing piece is **discovery, not capability**. No new tool: the same
-thirteen, reached by a client that was not spawned as a child.
+fifteen, reached by a client that was not spawned as a child.
 
 **The shape, to settle.** The pieces are small and their arrangement is not:
 
@@ -830,7 +830,7 @@ thirteen, reached by a client that was not spawned as a child.
 - **How a client registers it.** A subcommand emitting the `mcpServers` snippet
   (`termherd mcp-config`) keeps the token out of shell history and out of argv,
   where an `--print-token` flag would put it in both.
-- **Whether the surface is the same thirteen.** Probably yes: a narrower
+- **Whether the surface is the same fifteen.** Probably yes: a narrower
   read-only surface would be a second contract to keep true, and the
   interesting uses (drive, wait, screenshot) are the mutating ones.
 
@@ -956,6 +956,12 @@ repository whose directory was deleted, and a discovered project whose `cwd`
 went away. That symmetry is why it is a feature of its own rather than a
 paragraph in either.
 
+**No issue yet: it is blocked on its sibling, not on design.** The sweep sets
+[F-repo-remove](#f-repo-remove)'s `removed` flag, which does not exist yet, and
+that flag is the whole reason an over-eager prune is recoverable. Building this
+first would mean either deleting outright or inventing a second flag to be
+merged later — both worse than waiting.
+
 <a id="f-repo-remove"></a>
 
 ### F-repo-remove
@@ -991,6 +997,14 @@ decision rather than a consequence.
 [F-repo-prune](#f-repo-prune) is its automated caller: pruning sets this flag
 rather than erasing anything, which is what makes an over-eager sweep
 recoverable.
+
+**No issue yet, and that is the reason.** Reversibility above is not a detail
+to settle while building: a removal with no way back is a different feature
+from one with a *Show removed* toggle, and the per-session question changes the
+data model rather than the UI. Filed as it stands, the ticket would carry the
+decision instead of the work. [F-repo-add](#f-repo-add) shipped the insertion
+point — the visibility predicate is written once — so nothing is blocked
+meanwhile.
 
 <a id="f-repo-view"></a>
 

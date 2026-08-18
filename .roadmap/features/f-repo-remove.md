@@ -37,3 +37,11 @@ decision rather than a consequence.
 [F-repo-prune](#f-repo-prune) is its automated caller: pruning sets this flag
 rather than erasing anything, which is what makes an over-eager sweep
 recoverable.
+
+**No issue yet, and that is the reason.** Reversibility above is not a detail
+to settle while building: a removal with no way back is a different feature
+from one with a *Show removed* toggle, and the per-session question changes the
+data model rather than the UI. Filed as it stands, the ticket would carry the
+decision instead of the work. [F-repo-add](#f-repo-add) shipped the insertion
+point — the visibility predicate is written once — so nothing is blocked
+meanwhile.

@@ -28,3 +28,9 @@ It concerns both halves of [F-repo-add](#f-repo-add)'s union: a declared
 repository whose directory was deleted, and a discovered project whose `cwd`
 went away. That symmetry is why it is a feature of its own rather than a
 paragraph in either.
+
+**No issue yet: it is blocked on its sibling, not on design.** The sweep sets
+[F-repo-remove](#f-repo-remove)'s `removed` flag, which does not exist yet, and
+that flag is the whole reason an over-eager prune is recoverable. Building this
+first would mean either deleting outright or inventing a second flag to be
+merged later — both worse than waiting.

@@ -25,7 +25,7 @@ Read once at startup, and defensively:
 Two neighbouring files are TermHerd's, not yours to edit: `window.json` (size
 and position — a position left off every connected monitor is dropped, so the
 window re-centers instead of opening out of reach) and `metadata.json` (stars,
-archives, custom titles).
+archives, custom titles, and the repositories you added by hand).
 
 ## Options
 
