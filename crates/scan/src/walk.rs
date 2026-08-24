@@ -49,6 +49,21 @@ pub(crate) fn scan_root(root: &Path, cache: &mut ScanCache) -> Result<ScanOutcom
     Ok(ScanOutcome { records, skipped })
 }
 
+/// Whether `id` is a well-formed Claude session id: the charset Claude Code
+/// mints (`[A-Za-z0-9_-]`), non-empty, and not starting with `-`. The stem of a
+/// session `.jsonl` becomes the `--resume <id>` termherd types into the shell,
+/// so a stem outside this charset is refused at the scan boundary rather than
+/// trusted in a shell grammar that differs per platform — and a leading `-`
+/// (e.g. `--help`, `-rf`) is refused too, since `claude` would parse it as a
+/// flag rather than the resume value.
+fn is_valid_session_id(id: &str) -> bool {
+    !id.is_empty()
+        && !id.starts_with('-')
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
 /// One project folder → its session records, or `None` when no project
 /// path can be derived. Unchanged files reuse `old`'s digests; whatever this
 /// scan learns lands in `next`.
@@ -80,6 +95,11 @@ fn scan_folder(dir: &Path, old: &ScanCache, next: &mut ScanCache) -> Option<Vec<
         let Some(session_id) = path.file_stem().map(|s| s.to_string_lossy().into_owned()) else {
             continue;
         };
+        // Refused at the same per-file tier as an unparseable transcript below;
+        // see `is_valid_session_id` for why the stem is untrusted.
+        if !is_valid_session_id(&session_id) {
+            continue;
+        }
         let sig = file_sig(&path);
         let digest = match (sig, old.digests.get(&path)) {
             (Some(sig), Some(hit)) if hit.sig == sig => hit.digest.clone(),
@@ -145,6 +165,104 @@ mod tests {
         assert_eq!(records.len(), 2);
         assert!(records.iter().all(|r| r.project_path == "/real/proj"));
         assert!(records.iter().any(|r| r.session_id == "abc"));
+    }
+
+    #[test]
+    fn a_session_id_carrying_shell_metacharacters_is_refused_at_the_scan_boundary() {
+        // A `.jsonl` filename becomes the `--resume <id>` termherd types into the
+        // freshly spawned shell. A real Claude session id is `[A-Za-z0-9_-]+`, so
+        // any other character is refused here — before it can reach that line —
+        // rather than trusted and quoted downstream in a shell grammar that
+        // differs per platform (zsh/bash vs PowerShell/cmd).
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().join("C--proj");
+        fs::create_dir(&folder).unwrap();
+        write_session(
+            &folder,
+            "9f8e7d6c-4b2a-4c1d-8e3f-0123456789ab.jsonl",
+            "/real/proj",
+            "real",
+        );
+        write_session(&folder, "evil; touch pwned.jsonl", "/real/proj", "attack");
+
+        let records = FsScanner::new(tmp.path().to_owned()).scan().unwrap();
+
+        assert!(
+            records.iter().all(|r| {
+                r.session_id
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            }),
+            "no scanned session id may carry a shell metacharacter"
+        );
+        assert!(
+            records
+                .iter()
+                .any(|r| r.session_id == "9f8e7d6c-4b2a-4c1d-8e3f-0123456789ab"),
+            "the well-formed session id is still scanned"
+        );
+    }
+
+    #[test]
+    fn a_command_substitution_filename_never_becomes_a_session() {
+        // The classic payload: `$(...)` in the stem. Distinct from `;` above so a
+        // fix that only strips one metacharacter still fails this.
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().join("C--proj");
+        fs::create_dir(&folder).unwrap();
+        write_session(&folder, "x$(touch owned).jsonl", "/real/proj", "attack");
+
+        let records = FsScanner::new(tmp.path().to_owned()).scan().unwrap();
+
+        assert!(
+            records.is_empty(),
+            "a command-substitution filename must yield no session, got {records:?}"
+        );
+    }
+
+    #[test]
+    fn a_flag_shaped_filename_never_becomes_a_session() {
+        // `--help.jsonl` is all-charset but `claude --resume --help` would read
+        // the stem as a flag, not the resume value. Refused at the boundary.
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().join("C--proj");
+        fs::create_dir(&folder).unwrap();
+        write_session(&folder, "--help.jsonl", "/real/proj", "attack");
+
+        let records = FsScanner::new(tmp.path().to_owned()).scan().unwrap();
+
+        assert!(
+            records.is_empty(),
+            "a flag-shaped filename must yield no session, got {records:?}"
+        );
+    }
+
+    #[test]
+    fn is_valid_session_id_accepts_only_the_claude_charset() {
+        for ok in [
+            "abc",
+            "9f8e7d6c-4b2a-4c1d-8e3f-0123456789ab",
+            "with_underscore",
+            "MiXeD-123",
+        ] {
+            assert!(is_valid_session_id(ok), "{ok:?} is a well-formed id");
+        }
+        for bad in [
+            "",       // empty
+            "a b",    // space
+            "x;rm",   // command separator
+            "x$(id)", // command substitution
+            "a`id`",  // backtick
+            "a|b",    // pipe
+            "a/b",    // path separator
+            "a'b",    // quote
+            "a\nb",   // newline
+            "-rf",    // leading dash → `claude --resume -rf` reads it as a flag
+            "--help", // ditto, a real claude flag
+            "-",      // bare dash
+        ] {
+            assert!(!is_valid_session_id(bad), "{bad:?} must be refused");
+        }
     }
 
     #[test]
