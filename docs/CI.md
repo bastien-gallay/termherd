@@ -75,14 +75,12 @@ This is the cheapest place to catch a failure — do it before opening a PR.
 Everything fans out in parallel (no inter-job ordering):
 
 - **`ci`** — a `changes` classifier plus twelve gate jobs (`fmt`, `clippy`,
-  `test`, `portable`, `cargo-deny`, `cargo-machete`, `dependency-rule`, `intra-crate-arch`,
-  `actionlint`, `markdownlint`, `roadmap`, `mdbook`), each gated on its file
-  category and fanned into the `ci-success` aggregator. Jobs whose category
-  didn't change
-  report `skipped` (a docs-only PR skips all the Rust jobs) and `ci-success`
-  still passes.
-  `cross-os` is **skipped** on PRs. Branch protection requires only
-  `ci-success`.
+  `test`, `portable`, `cargo-deny`, `cargo-machete`, `dependency-rule`,
+  `intra-crate-arch`, `actionlint`, `markdownlint`, `roadmap`, `mdbook`), each
+  gated on its file category and fanned into the `ci-success` aggregator. Jobs
+  whose category didn't change report `skipped` (a docs-only PR skips all the
+  Rust jobs) and `ci-success` still passes. `cross-os` is **skipped** on PRs.
+  Branch protection requires only `ci-success`.
 - **`codeql`** — does **not** run on PRs (push→main + weekly only); see the
   Merge/Scheduled stages below. SAST reaches the code seconds after merge.
 - **`release`** — runs in *validation* mode (cargo-dist's `plan`; artifact
