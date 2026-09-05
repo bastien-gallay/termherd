@@ -1037,12 +1037,11 @@ mod tests {
             Request::ListSessions,
             "the tool asked the bridge for the session list"
         );
-        let rows = result
-            .structured_content
-            .expect("structured json content")
+        let value = result.structured_content.expect("structured json content");
+        let rows = value["sessions"]
             .as_array()
             .cloned()
-            .expect("an array of sessions");
+            .expect("the rows ride in a `sessions` field of the envelope");
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0]["handle"], "7", "the stable handle is carried out");
         assert_eq!(rows[0]["kind"], "claude");
@@ -1051,6 +1050,197 @@ mod tests {
             rows[0]["resume_id"], "claude-xyz",
             "the Claude id rides alongside the handle, not as it"
         );
+    }
+
+    #[tokio::test]
+    async fn list_sessions_answers_an_object_even_with_no_sessions() {
+        // The empty workspace is the first thing a fresh caller meets, and a
+        // bare `[]` fails the client's schema check exactly as a full one does.
+        let (handle, requests) = channel();
+        let _shell = spawn_test_shell(requests, Reply::Sessions(Vec::new()));
+
+        let result = TermherdMcp::new(handle)
+            .list_sessions()
+            .await
+            .expect("the tool returns a result");
+
+        assert_eq!(
+            result.structured_content.expect("structured json content"),
+            serde_json::json!({ "sessions": [] }),
+        );
+    }
+
+    #[test]
+    fn structured_refuses_a_payload_that_is_not_an_object() {
+        // The guard the sweep below leans on. Reachable, so it is pinned here
+        // rather than left as an assertion nobody can trigger.
+        let error = structured(serde_json::json!([1, 2, 3]))
+            .expect_err("a bare array is not valid structuredContent");
+        assert!(
+            error.message.contains("object"),
+            "the error names the rule it enforces, got: {}",
+            error.message
+        );
+    }
+
+    /// One sweep case: the reply the shell must give for this tool, and the call
+    /// that drives it. Both halves live in a single `match` so the tool list is
+    /// stated once; a tool the sweep does not know panics there rather than
+    /// being skipped in silence.
+    type SweepCall<'a> =
+        std::pin::Pin<Box<dyn Future<Output = Result<CallToolResult, ErrorData>> + 'a>>;
+
+    /// `None` for a tool that answers with something other than structured
+    /// content — only `screenshot`, whose pixels ride as image content.
+    fn sweep_case<'a>(mcp: &'a TermherdMcp, tool: &str) -> Option<(Reply, SweepCall<'a>)> {
+        use crate::shell::bridge::{ActionOutcome, TerminalRead, WaitOutcome};
+
+        let acted = || {
+            Reply::Acted(ActionOutcome {
+                focused: Some("1".into()),
+                error: None,
+                repo: None,
+            })
+        };
+        Some(match tool {
+            "list_sessions" => (
+                Reply::Sessions(Vec::new()),
+                Box::pin(mcp.list_sessions()) as SweepCall<'a>,
+            ),
+            "snapshot" => (
+                Reply::Snapshot(
+                    App::new().snapshot(&SnapshotFilter::default(), &SnapshotInputs::default()),
+                ),
+                Box::pin(mcp.snapshot(Parameters(SnapshotArgs::default()))),
+            ),
+            "open_session" => (
+                acted(),
+                Box::pin(mcp.open_session(Parameters(OpenArgs::default()))),
+            ),
+            "split_pane" => (
+                acted(),
+                Box::pin(mcp.split_pane(Parameters(SplitArgs::default()))),
+            ),
+            "focus_pane" => (
+                acted(),
+                Box::pin(mcp.focus_pane(Parameters(FocusArgs {
+                    session: "1".into(),
+                }))),
+            ),
+            "rename_tab" => (
+                acted(),
+                Box::pin(mcp.rename_tab(Parameters(RenameArgs {
+                    tab: 0,
+                    title: "t".into(),
+                }))),
+            ),
+            "add_repo" => (
+                acted(),
+                Box::pin(mcp.add_repo(Parameters(RepoArgs { path: "/p".into() }))),
+            ),
+            "forget_repo" => (
+                acted(),
+                Box::pin(mcp.forget_repo(Parameters(RepoArgs { path: "/p".into() }))),
+            ),
+            "close_pane" => (
+                acted(),
+                Box::pin(mcp.close_pane(Parameters(CloseArgs::default()))),
+            ),
+            "run_in_session" => (
+                acted(),
+                Box::pin(mcp.run_in_session(Parameters(RunArgs {
+                    session: "1".into(),
+                    text: "ls\n".into(),
+                }))),
+            ),
+            "wait_for_status" => (
+                Reply::Waited(WaitOutcome {
+                    status: Some(SessionStatus::Idle),
+                    error: None,
+                }),
+                Box::pin(mcp.wait_for_status(Parameters(WaitArgs {
+                    session: "1".into(),
+                    ..WaitArgs::default()
+                }))),
+            ),
+            "read_terminal" => (
+                Reply::Terminal(TerminalRead {
+                    text: Some("hello".into()),
+                    error: None,
+                }),
+                Box::pin(mcp.read_terminal(Parameters(ReadArgs {
+                    session: "1".into(),
+                    lines: None,
+                }))),
+            ),
+            "press_keys" => (
+                Reply::Pressed(PressOutcome {
+                    steps: vec![PressStep::Unbound],
+                    focused: Some("1".into()),
+                    error: None,
+                }),
+                Box::pin(mcp.press_keys(Parameters(PressKeysArgs {
+                    keys: vec!["escape".into()],
+                }))),
+            ),
+            "run_action" => (
+                Reply::Pressed(PressOutcome {
+                    steps: vec![PressStep::Ran("close-focused".into())],
+                    focused: Some("1".into()),
+                    error: None,
+                }),
+                Box::pin(mcp.run_action(Parameters(RunActionArgs {
+                    actions: vec!["close-focused".into()],
+                }))),
+            ),
+            // The pixels ride as image content; there is no structured answer
+            // to check.
+            "screenshot" => return None,
+            other => panic!(
+                "tool {other:?} is new: add it to the structuredContent sweep, \
+                 or say here why it answers with something else"
+            ),
+        })
+    }
+
+    #[tokio::test]
+    async fn every_tool_that_answers_with_structured_content_answers_an_object() {
+        // MCP requires `structuredContent` to be an object; a client rejects an
+        // array or a scalar on its schema check, before the caller sees a byte.
+        // The tool list comes from the router itself rather than from a list
+        // typed here, so a tool added later fails this sweep instead of
+        // slipping past an enumeration that merely claims to be exhaustive.
+        let (probe, _probe_requests) = channel();
+        let tools: Vec<String> = TermherdMcp::new(probe)
+            .tool_router
+            .list_all()
+            .iter()
+            .map(|tool| tool.name.to_string())
+            .collect();
+        assert!(
+            tools.len() >= 15,
+            "the router publishes the whole surface, got {} tools",
+            tools.len()
+        );
+
+        for tool in tools {
+            let (handle, requests) = channel();
+            let mcp = TermherdMcp::new(handle);
+            let Some((reply, call)) = sweep_case(&mcp, &tool) else {
+                continue;
+            };
+            let _shell = spawn_test_shell(requests, reply);
+            let result = call.await.unwrap_or_else(|error| {
+                panic!("{tool} answered an error: {}", error.message);
+            });
+            let value = result
+                .structured_content
+                .unwrap_or_else(|| panic!("{tool} answers with structured content"));
+            assert!(
+                value.is_object(),
+                "{tool} must answer a JSON object, got: {value}"
+            );
+        }
     }
 
     #[tokio::test]
