@@ -7,6 +7,15 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (list_sessions over MCP)
+
+- `list_sessions` answered a bare JSON array, which MCP clients reject on their
+  schema check — every call failed before the caller saw a row. The sessions now
+  ride in a `sessions` field, like every other tool's answer (#299).
+- The rule is enforced at one seam rather than remembered per tool: a structured
+  answer that is not a JSON object is refused where it is built, and a sweep
+  reads the tool list from the router so a tool added later cannot slip past it.
+
 ### Added (a repository in the sidebar, before it has any session)
 
 - A sidebar row is no longer born only from a session. **+ Add a repo** opens
