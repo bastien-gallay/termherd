@@ -175,7 +175,7 @@ split + `Sessions` registry + `Sidebar`/`FontState` field-flatten, A1–A4 —
 `F-antigravity-sessions` #160/#161 build on), #171 (F, json_store —
 **shipped**) and #172 (pty →
 `input`/`grid`/`events`/`status`/`session`/`kill`/`manager` — **shipped**, the
-seam #143 foreground-process detection and #155 vim mouse build on).
+seam #143 foreground-process detection and #155 mouse buttons build on).
 Cognitive-complexity (signal C) stays unfiled. **Report-only** (was blocked on
 a quality-report home): file length (signal A) now ships **inside #173's gate**
 as a job-summary report; churn×size hotspots (signal J) stays unfiled. Dropped:
@@ -245,10 +245,10 @@ configured string is split on whitespace *before* `{path}` is substituted, so a
 filename cannot become a second argument, and a placeholder in the program name
 is refused outright — what the terminal printed picks the file, never the
 executable. Unconfigured, the OS handoff and its refusal both stand.
-Two contract bugs sit on the same surface: mouse reporting
-isn't forwarded to the child (#155, vim) and the `emitted_lines_never_drift`
-property has a known failing scroll sequence whose seed was never committed
-(#102)
+Two contract bugs sit on the same surface: mouse buttons are never
+encoded to the child, so no mouse-mode app gets a click (#155), and the
+`emitted_lines_never_drift` property has a known failing scroll sequence whose
+seed was never committed (#102)
 
 <a id="f-close-confirm-policy"></a>
 

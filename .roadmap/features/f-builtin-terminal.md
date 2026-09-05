@@ -54,7 +54,7 @@ configured string is split on whitespace *before* `{path}` is substituted, so a
 filename cannot become a second argument, and a placeholder in the program name
 is refused outright — what the terminal printed picks the file, never the
 executable. Unconfigured, the OS handoff and its refusal both stand.
-Two contract bugs sit on the same surface: mouse reporting
-isn't forwarded to the child (#155, vim) and the `emitted_lines_never_drift`
-property has a known failing scroll sequence whose seed was never committed
-(#102)
+Two contract bugs sit on the same surface: mouse buttons are never
+encoded to the child, so no mouse-mode app gets a click (#155), and the
+`emitted_lines_never_drift` property has a known failing scroll sequence whose
+seed was never committed (#102)
