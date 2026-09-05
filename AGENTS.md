@@ -493,6 +493,16 @@ exists). Do not relax them locally.
   failure the test existed to kill. Either derive the list from the same source
   the code uses, or make each case fail loudly on its own — never assert
   completeness in prose above an enumeration a human typed.
+  Deriving the list is necessary and not sufficient, because an **exemption**
+  is where a derived list quietly becomes a typed one again.
+  `every_tool_answers_its_structured_content_as_an_object` reads its tools from
+  the router and still excused one by hand: `screenshot`, on a comment claiming
+  it answers no structured content — untrue, and it was also the one tool
+  assigning `structured_content` outside the shared guard, so the only tool
+  bypassing the rule was the only one the sweep skipped. Verify the claim that
+  justifies an exemption, or drop the exemption and write the case a fixture.
+  (Review caught this inside #302 and it was squashed away, so `git log` on
+  `main` will not show it — the PR is where the evidence is.)
 
 ## Conventions
 
