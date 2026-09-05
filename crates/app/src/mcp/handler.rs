@@ -442,10 +442,10 @@ impl TermherdMcp {
         let mut result = CallToolResult::success(vec![ContentBlock::image(data, "image/png")]);
         // The size the caller *received*, which is not the size it asked for
         // when the window was smaller than the bound.
-        result.structured_content = Some(serde_json::json!({
+        result.structured_content = Some(structured_content(serde_json::json!({
             "width": shot.width,
             "height": shot.height,
-        }));
+        }))?);
         Ok(result)
     }
 
@@ -651,11 +651,8 @@ impl ServerHandler for TermherdMcp {
     }
 }
 
-/// The `list_sessions` answer. The rows ride in a field rather than as the
-/// payload itself because MCP requires `structuredContent` to be a JSON object:
-/// a bare array is rejected by the client's schema check, before the caller
-/// sees a byte. The envelope is also where a later count or truncation marker
-/// goes, which an array has nowhere to put.
+/// The `list_sessions` answer: the rows in an envelope, since
+/// [`structured_content`] admits only an object.
 #[derive(Serialize)]
 struct SessionListDto {
     sessions: Vec<SessionDto>,
@@ -821,25 +818,27 @@ struct RunArgs {
     text: String,
 }
 
-/// Shape a serialisable payload into a tool result's `structuredContent`.
-///
-/// The one seam every structured answer passes through, so "this is how a tool
-/// answers" is stated once rather than restated at each tool — and so the rule
-/// that shape must obey is enforced rather than remembered: MCP requires an
-/// object, and a client rejects an array or a scalar on its schema check before
-/// the caller sees a byte. A payload that is not an object is a programming
-/// error here, not a caller's, so it surfaces as an internal error naming the
-/// rule.
+/// A tool result carrying `payload` as its `structuredContent`.
 fn structured<T: Serialize>(payload: T) -> Result<CallToolResult, ErrorData> {
+    Ok(CallToolResult::structured(structured_content(payload)?))
+}
+
+/// `payload` as `structuredContent`, refused unless it is a JSON object.
+///
+/// MCP clients reject an array or a scalar on their schema check, before the
+/// caller sees a byte — so every structured answer is shaped here, and a
+/// payload that cannot be one is a programming error, not a caller's.
+fn structured_content<T: Serialize>(payload: T) -> Result<serde_json::Value, ErrorData> {
     let value = serde_json::to_value(payload)
         .map_err(|error| ErrorData::internal_error(error.to_string(), None))?;
-    if !value.is_object() {
-        return Err(ErrorData::internal_error(
+    if value.is_object() {
+        Ok(value)
+    } else {
+        Err(ErrorData::internal_error(
             "structuredContent must be a JSON object; wrap this payload in one",
             None,
-        ));
+        ))
     }
-    Ok(CallToolResult::structured(value))
 }
 
 /// A screenshot that produced no image, as a *tool-level* error: the caller
@@ -1075,8 +1074,6 @@ mod tests {
 
     #[tokio::test]
     async fn list_sessions_answers_an_object_even_with_no_sessions() {
-        // The empty workspace is the first thing a fresh caller meets, and a
-        // bare `[]` fails the client's schema check exactly as a full one does.
         let (handle, requests) = channel();
         let _shell = spawn_test_shell(requests, Reply::Sessions(Vec::new()));
 
@@ -1093,8 +1090,6 @@ mod tests {
 
     #[test]
     fn structured_refuses_a_payload_that_is_not_an_object() {
-        // The guard the sweep below leans on. Reachable, so it is pinned here
-        // rather than left as an assertion nobody can trigger.
         let error = structured(serde_json::json!([1, 2, 3]))
             .expect_err("a bare array is not valid structuredContent");
         assert!(
@@ -1108,14 +1103,12 @@ mod tests {
     type SweepCall<'a> =
         std::pin::Pin<Box<dyn Future<Output = Result<CallToolResult, ErrorData>> + 'a>>;
 
-    /// One sweep case: the reply the shell must give for this tool, and the call
-    /// that drives it. Both halves live in a single `match` so the tool list is
-    /// stated once, and a tool the sweep does not know panics there rather than
-    /// being skipped in silence. `None` is for a tool that answers with
-    /// something other than structured content — only `screenshot`, whose pixels
-    /// ride as image content.
-    fn sweep_case<'a>(mcp: &'a TermherdMcp, tool: &str) -> Option<(Reply, SweepCall<'a>)> {
-        use crate::shell::bridge::{ActionOutcome, TerminalRead, WaitOutcome};
+    /// The reply the shell must give for `tool`, and the call that drives it.
+    ///
+    /// One `match` states the tool list once, so a tool the sweep does not know
+    /// panics here rather than being skipped in silence.
+    fn sweep_case<'a>(mcp: &'a TermherdMcp, tool: &str) -> (Reply, SweepCall<'a>) {
+        use crate::shell::bridge::{ActionOutcome, ShotResult, TerminalRead, WaitOutcome};
 
         let acted = || {
             Reply::Acted(ActionOutcome {
@@ -1124,7 +1117,7 @@ mod tests {
                 repo: None,
             })
         };
-        Some(match tool {
+        match tool {
             "list_sessions" => (
                 Reply::Sessions(Vec::new()),
                 Box::pin(mcp.list_sessions()) as SweepCall<'a>,
@@ -1215,36 +1208,34 @@ mod tests {
                     actions: vec!["close-focused".into()],
                 }))),
             ),
-            // The pixels ride as image content; there is no structured answer
-            // to check.
-            "screenshot" => return None,
-            other => panic!(
-                "tool {other:?} is new: add it to the structuredContent sweep, \
-                 or say here why it answers with something else"
+            "screenshot" => (
+                Reply::Shot(ShotResult {
+                    png: Some(vec![0]),
+                    width: 8,
+                    height: 4,
+                    error: None,
+                }),
+                Box::pin(mcp.screenshot(Parameters(ScreenshotArgs::default()))),
             ),
-        })
+            other => panic!("tool {other:?} is new: add it to the structuredContent sweep"),
+        }
     }
 
     #[tokio::test]
-    async fn every_tool_that_answers_with_structured_content_answers_an_object() {
-        // MCP requires `structuredContent` to be an object; a client rejects an
-        // array or a scalar on its schema check, before the caller sees a byte.
-        // The tool list comes from the router itself rather than from a list
-        // typed here, so a tool added later fails this sweep instead of
-        // slipping past an enumeration that merely claims to be exhaustive.
+    async fn every_tool_answers_its_structured_content_as_an_object() {
+        // The list comes from the router rather than from an enumeration typed
+        // here, so a tool added later fails this sweep instead of slipping past.
         let tools: Vec<String> = TermherdMcp::tool_router()
             .list_all()
             .iter()
             .map(|tool| tool.name.to_string())
             .collect();
+        assert!(!tools.is_empty(), "an empty router would pass vacuously");
 
-        let mut checked = 0;
         for tool in tools {
             let (handle, requests) = channel();
             let mcp = TermherdMcp::new(handle);
-            let Some((reply, call)) = sweep_case(&mcp, &tool) else {
-                continue;
-            };
+            let (reply, call) = sweep_case(&mcp, &tool);
             let _shell = spawn_test_shell(requests, reply);
             let result = call.await.unwrap_or_else(|error| {
                 panic!("{tool} answered an error: {}", error.message);
@@ -1256,11 +1247,7 @@ mod tests {
                 value.is_object(),
                 "{tool} must answer a JSON object, got: {value}"
             );
-            checked += 1;
         }
-        // An empty router would walk this loop without asserting anything and
-        // still pass — success and vacuity have to stay distinguishable.
-        assert!(checked > 0, "the sweep asserted on no tool at all");
     }
 
     #[tokio::test]
