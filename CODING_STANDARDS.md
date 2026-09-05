@@ -318,6 +318,18 @@ purpose*, not by accident.
   sanctioned code, `FRn`, is defined in [`AGENTS.md`](AGENTS.md) conventions).
 - Every public item has a doc comment: a one-line summary, then details and
   examples, using intra-doc links.
+- **A doc comment is a contract, not an essay.** The summary line names what
+  the item is for; anything after it earns its place by stating a constraint
+  the signature cannot — never by paraphrasing the body, re-arguing the design,
+  or retelling the bug that motivated it. That history belongs in the commit
+  and the PR, which are dated and searchable where a doc comment only rots.
+- **Prefer the refactor to the paragraph.** When an explanation is getting
+  long, the code is usually the thing to change: split the function so its
+  halves are named, hoist the invariant into a type or a guard that enforces
+  it, or turn the rule into a predicate other code calls. A rule expressed in
+  prose is unchecked; the same rule expressed in code fails the build.
+- The same economy applies in tests: the test name states the intent, so a
+  comment above it that restates the assertion goes.
 
 ```rust
 /// Drives one terminal session: spawn, write, resize, kill.

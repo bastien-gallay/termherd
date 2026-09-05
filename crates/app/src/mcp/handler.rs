@@ -105,10 +105,8 @@ impl TermherdMcp {
                 None,
             ));
         };
-        let rows: Vec<SessionDto> = sessions.iter().map(SessionDto::from).collect();
-        let value = serde_json::to_value(&rows)
-            .map_err(|error| ErrorData::internal_error(error.to_string(), None))?;
-        Ok(CallToolResult::structured(value))
+        let sessions = sessions.iter().map(SessionDto::from).collect();
+        structured(SessionListDto { sessions })
     }
 
     /// A filterable, read-only snapshot of the whole workspace — the structured
@@ -141,9 +139,7 @@ impl TermherdMcp {
                 None,
             ));
         };
-        let value = serde_json::to_value(SnapshotDto::from(&snapshot))
-            .map_err(|error| ErrorData::internal_error(error.to_string(), None))?;
-        Ok(CallToolResult::structured(value))
+        structured(SnapshotDto::from(&snapshot))
     }
 
     /// Open a new terminal session and focus it. → `open_session`.
@@ -343,10 +339,10 @@ impl TermherdMcp {
                 if let Some(reason) = outcome.error {
                     return Err(ErrorData::invalid_params(reason, None));
                 }
-                Ok(CallToolResult::structured(serde_json::json!({
+                structured(serde_json::json!({
                     "status": outcome.status.map(status_str),
                     "timed_out": false,
-                })))
+                }))
             }
             Ok(_) => Err(ErrorData::internal_error(
                 "bridge answered the wrong reply kind",
@@ -357,10 +353,10 @@ impl TermherdMcp {
             // current status to decide whether to keep waiting or give up.
             Err(CallError::Timeout(_)) => {
                 let status = self.current_status(session).await;
-                Ok(CallToolResult::structured(serde_json::json!({
+                structured(serde_json::json!({
                     "status": status,
                     "timed_out": true,
-                })))
+                }))
             }
             Err(error) => Err(ErrorData::internal_error(error.to_string(), None)),
         }
@@ -397,10 +393,10 @@ impl TermherdMcp {
         if let Some(reason) = read.error {
             return Err(ErrorData::invalid_params(reason, None));
         }
-        Ok(CallToolResult::structured(serde_json::json!({
+        structured(serde_json::json!({
             "text": read.text.as_deref().unwrap_or_default(),
             "rendered": read.text.is_some(),
-        })))
+        }))
     }
 
     /// The window's pixels — what the text `snapshot` cannot show.
@@ -446,10 +442,10 @@ impl TermherdMcp {
         let mut result = CallToolResult::success(vec![ContentBlock::image(data, "image/png")]);
         // The size the caller *received*, which is not the size it asked for
         // when the window was smaller than the bound.
-        result.structured_content = Some(serde_json::json!({
+        result.structured_content = Some(structured_content(serde_json::json!({
             "width": shot.width,
             "height": shot.height,
-        }));
+        }))?);
         Ok(result)
     }
 
@@ -594,11 +590,10 @@ impl TermherdMcp {
             .zip(requested)
             .map(|(step, press)| PressStepDto::new(press, step))
             .collect();
-        let value = serde_json::json!({
+        structured(serde_json::json!({
             "steps": steps,
             "focused_handle": outcome.focused,
-        });
-        Ok(CallToolResult::structured(value))
+        }))
     }
 
     /// Send an [`Action`] over the bridge and shape its [`ActionOutcome`] into a
@@ -630,7 +625,7 @@ impl TermherdMcp {
             object.insert("session_count".into(), repo.session_count.into());
             object.insert("in_sidebar".into(), repo.visible.into());
         }
-        Ok(CallToolResult::structured(value))
+        structured(value)
     }
 }
 
@@ -654,6 +649,13 @@ impl ServerHandler for TermherdMcp {
         );
         info
     }
+}
+
+/// The `list_sessions` answer: the rows in an envelope, since
+/// [`structured_content`] admits only an object.
+#[derive(Serialize)]
+struct SessionListDto {
+    sessions: Vec<SessionDto>,
 }
 
 /// The on-the-wire shape of a session for the `list_sessions` tool: the stable
@@ -814,6 +816,29 @@ struct RunArgs {
     session: String,
     /// Text to type; include a trailing newline to submit a command.
     text: String,
+}
+
+/// A tool result carrying `payload` as its `structuredContent`.
+fn structured<T: Serialize>(payload: T) -> Result<CallToolResult, ErrorData> {
+    Ok(CallToolResult::structured(structured_content(payload)?))
+}
+
+/// `payload` as `structuredContent`, refused unless it is a JSON object.
+///
+/// MCP clients reject an array or a scalar on their schema check, before the
+/// caller sees a byte — so every structured answer is shaped here, and a
+/// payload that cannot be one is a programming error, not a caller's.
+fn structured_content<T: Serialize>(payload: T) -> Result<serde_json::Value, ErrorData> {
+    let value = serde_json::to_value(payload)
+        .map_err(|error| ErrorData::internal_error(error.to_string(), None))?;
+    if value.is_object() {
+        Ok(value)
+    } else {
+        Err(ErrorData::internal_error(
+            "structuredContent must be a JSON object; wrap this payload in one",
+            None,
+        ))
+    }
 }
 
 /// A screenshot that produced no image, as a *tool-level* error: the caller
@@ -1032,12 +1057,11 @@ mod tests {
             Request::ListSessions,
             "the tool asked the bridge for the session list"
         );
-        let rows = result
-            .structured_content
-            .expect("structured json content")
+        let value = result.structured_content.expect("structured json content");
+        let rows = value["sessions"]
             .as_array()
             .cloned()
-            .expect("an array of sessions");
+            .expect("the rows ride in a `sessions` field of the envelope");
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0]["handle"], "7", "the stable handle is carried out");
         assert_eq!(rows[0]["kind"], "claude");
@@ -1046,6 +1070,184 @@ mod tests {
             rows[0]["resume_id"], "claude-xyz",
             "the Claude id rides alongside the handle, not as it"
         );
+    }
+
+    #[tokio::test]
+    async fn list_sessions_answers_an_object_even_with_no_sessions() {
+        let (handle, requests) = channel();
+        let _shell = spawn_test_shell(requests, Reply::Sessions(Vec::new()));
+
+        let result = TermherdMcp::new(handle)
+            .list_sessions()
+            .await
+            .expect("the tool returns a result");
+
+        assert_eq!(
+            result.structured_content.expect("structured json content"),
+            serde_json::json!({ "sessions": [] }),
+        );
+    }
+
+    #[test]
+    fn structured_refuses_a_payload_that_is_not_an_object() {
+        let error = structured(serde_json::json!([1, 2, 3]))
+            .expect_err("a bare array is not valid structuredContent");
+        assert!(
+            error.message.contains("object"),
+            "the error names the rule it enforces, got: {}",
+            error.message
+        );
+    }
+
+    /// A tool call in flight, boxed so one `match` can return any of them.
+    type SweepCall<'a> =
+        std::pin::Pin<Box<dyn Future<Output = Result<CallToolResult, ErrorData>> + 'a>>;
+
+    /// The reply the shell must give for `tool`, and the call that drives it.
+    ///
+    /// One `match` states the tool list once, so a tool the sweep does not know
+    /// panics here rather than being skipped in silence.
+    fn sweep_case<'a>(mcp: &'a TermherdMcp, tool: &str) -> (Reply, SweepCall<'a>) {
+        use crate::shell::bridge::{ActionOutcome, ShotResult, TerminalRead, WaitOutcome};
+
+        let acted = || {
+            Reply::Acted(ActionOutcome {
+                focused: Some("1".into()),
+                error: None,
+                repo: None,
+            })
+        };
+        match tool {
+            "list_sessions" => (
+                Reply::Sessions(Vec::new()),
+                Box::pin(mcp.list_sessions()) as SweepCall<'a>,
+            ),
+            "snapshot" => (
+                Reply::Snapshot(
+                    App::new().snapshot(&SnapshotFilter::default(), &SnapshotInputs::default()),
+                ),
+                Box::pin(mcp.snapshot(Parameters(SnapshotArgs::default()))),
+            ),
+            "open_session" => (
+                acted(),
+                Box::pin(mcp.open_session(Parameters(OpenArgs::default()))),
+            ),
+            "split_pane" => (
+                acted(),
+                Box::pin(mcp.split_pane(Parameters(SplitArgs::default()))),
+            ),
+            "focus_pane" => (
+                acted(),
+                Box::pin(mcp.focus_pane(Parameters(FocusArgs {
+                    session: "1".into(),
+                }))),
+            ),
+            "rename_tab" => (
+                acted(),
+                Box::pin(mcp.rename_tab(Parameters(RenameArgs {
+                    tab: 0,
+                    title: "t".into(),
+                }))),
+            ),
+            "add_repo" => (
+                acted(),
+                Box::pin(mcp.add_repo(Parameters(RepoArgs { path: "/p".into() }))),
+            ),
+            "forget_repo" => (
+                acted(),
+                Box::pin(mcp.forget_repo(Parameters(RepoArgs { path: "/p".into() }))),
+            ),
+            "close_pane" => (
+                acted(),
+                Box::pin(mcp.close_pane(Parameters(CloseArgs::default()))),
+            ),
+            "run_in_session" => (
+                acted(),
+                Box::pin(mcp.run_in_session(Parameters(RunArgs {
+                    session: "1".into(),
+                    text: "ls\n".into(),
+                }))),
+            ),
+            "wait_for_status" => (
+                Reply::Waited(WaitOutcome {
+                    status: Some(SessionStatus::Idle),
+                    error: None,
+                }),
+                Box::pin(mcp.wait_for_status(Parameters(WaitArgs {
+                    session: "1".into(),
+                    ..WaitArgs::default()
+                }))),
+            ),
+            "read_terminal" => (
+                Reply::Terminal(TerminalRead {
+                    text: Some("hello".into()),
+                    error: None,
+                }),
+                Box::pin(mcp.read_terminal(Parameters(ReadArgs {
+                    session: "1".into(),
+                    lines: None,
+                }))),
+            ),
+            "press_keys" => (
+                Reply::Pressed(PressOutcome {
+                    steps: vec![PressStep::Unbound],
+                    focused: Some("1".into()),
+                    error: None,
+                }),
+                Box::pin(mcp.press_keys(Parameters(PressKeysArgs {
+                    keys: vec!["escape".into()],
+                }))),
+            ),
+            "run_action" => (
+                Reply::Pressed(PressOutcome {
+                    steps: vec![PressStep::Ran("close-focused".into())],
+                    focused: Some("1".into()),
+                    error: None,
+                }),
+                Box::pin(mcp.run_action(Parameters(RunActionArgs {
+                    actions: vec!["close-focused".into()],
+                }))),
+            ),
+            "screenshot" => (
+                Reply::Shot(ShotResult {
+                    png: Some(vec![0]),
+                    width: 8,
+                    height: 4,
+                    error: None,
+                }),
+                Box::pin(mcp.screenshot(Parameters(ScreenshotArgs::default()))),
+            ),
+            other => panic!("tool {other:?} is new: add it to the structuredContent sweep"),
+        }
+    }
+
+    #[tokio::test]
+    async fn every_tool_answers_its_structured_content_as_an_object() {
+        // The list comes from the router rather than from an enumeration typed
+        // here, so a tool added later fails this sweep instead of slipping past.
+        let tools: Vec<String> = TermherdMcp::tool_router()
+            .list_all()
+            .iter()
+            .map(|tool| tool.name.to_string())
+            .collect();
+        assert!(!tools.is_empty(), "an empty router would pass vacuously");
+
+        for tool in tools {
+            let (handle, requests) = channel();
+            let mcp = TermherdMcp::new(handle);
+            let (reply, call) = sweep_case(&mcp, &tool);
+            let _shell = spawn_test_shell(requests, reply);
+            let result = call.await.unwrap_or_else(|error| {
+                panic!("{tool} answered an error: {}", error.message);
+            });
+            let value = result
+                .structured_content
+                .unwrap_or_else(|| panic!("{tool} answers with structured content"));
+            assert!(
+                value.is_object(),
+                "{tool} must answer a JSON object, got: {value}"
+            );
+        }
     }
 
     #[tokio::test]

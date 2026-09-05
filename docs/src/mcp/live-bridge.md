@@ -15,10 +15,14 @@ session is torn down.
 
 | Tool | Args | Returns |
 | --- | --- | --- |
-| `list_sessions` | — | every live session: stable `handle`, tab title, cwd, kind (`shell` / `claude`), resumed Claude id, status |
+| `list_sessions` | — | `{ sessions: [...] }` — each row a live session: stable `handle`, tab title, cwd, kind (`shell` / `claude`), resumed Claude id, status |
 | `snapshot` | `sections`, `terminals`, `text_lines` | the whole state: config, sidebar, tabs and panes |
 | `read_terminal` | `session`, `lines` | `{ text, rendered }` |
 | `screenshot` | `max_width` | the window as a PNG |
+
+Every tool answers a JSON **object**: MCP clients reject anything else on their
+schema check, which is why `list_sessions` puts its rows in a `sessions` field
+rather than answering the array itself.
 
 **`snapshot` is light by default**: structure only, no terminal text. Scope
 text to named handles with `terminals`, or pass `sections` (any of `"config"`,
