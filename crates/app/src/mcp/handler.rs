@@ -106,9 +106,7 @@ impl TermherdMcp {
             ));
         };
         let rows: Vec<SessionDto> = sessions.iter().map(SessionDto::from).collect();
-        let value = serde_json::to_value(&rows)
-            .map_err(|error| ErrorData::internal_error(error.to_string(), None))?;
-        Ok(CallToolResult::structured(value))
+        structured(rows)
     }
 
     /// A filterable, read-only snapshot of the whole workspace — the structured
@@ -141,9 +139,7 @@ impl TermherdMcp {
                 None,
             ));
         };
-        let value = serde_json::to_value(SnapshotDto::from(&snapshot))
-            .map_err(|error| ErrorData::internal_error(error.to_string(), None))?;
-        Ok(CallToolResult::structured(value))
+        structured(SnapshotDto::from(&snapshot))
     }
 
     /// Open a new terminal session and focus it. → `open_session`.
@@ -343,10 +339,10 @@ impl TermherdMcp {
                 if let Some(reason) = outcome.error {
                     return Err(ErrorData::invalid_params(reason, None));
                 }
-                Ok(CallToolResult::structured(serde_json::json!({
+                structured(serde_json::json!({
                     "status": outcome.status.map(status_str),
                     "timed_out": false,
-                })))
+                }))
             }
             Ok(_) => Err(ErrorData::internal_error(
                 "bridge answered the wrong reply kind",
@@ -357,10 +353,10 @@ impl TermherdMcp {
             // current status to decide whether to keep waiting or give up.
             Err(CallError::Timeout(_)) => {
                 let status = self.current_status(session).await;
-                Ok(CallToolResult::structured(serde_json::json!({
+                structured(serde_json::json!({
                     "status": status,
                     "timed_out": true,
-                })))
+                }))
             }
             Err(error) => Err(ErrorData::internal_error(error.to_string(), None)),
         }
@@ -397,10 +393,10 @@ impl TermherdMcp {
         if let Some(reason) = read.error {
             return Err(ErrorData::invalid_params(reason, None));
         }
-        Ok(CallToolResult::structured(serde_json::json!({
+        structured(serde_json::json!({
             "text": read.text.as_deref().unwrap_or_default(),
             "rendered": read.text.is_some(),
-        })))
+        }))
     }
 
     /// The window's pixels — what the text `snapshot` cannot show.
@@ -594,11 +590,10 @@ impl TermherdMcp {
             .zip(requested)
             .map(|(step, press)| PressStepDto::new(press, step))
             .collect();
-        let value = serde_json::json!({
+        structured(serde_json::json!({
             "steps": steps,
             "focused_handle": outcome.focused,
-        });
-        Ok(CallToolResult::structured(value))
+        }))
     }
 
     /// Send an [`Action`] over the bridge and shape its [`ActionOutcome`] into a
@@ -630,7 +625,7 @@ impl TermherdMcp {
             object.insert("session_count".into(), repo.session_count.into());
             object.insert("in_sidebar".into(), repo.visible.into());
         }
-        Ok(CallToolResult::structured(value))
+        structured(value)
     }
 }
 
@@ -814,6 +809,16 @@ struct RunArgs {
     session: String,
     /// Text to type; include a trailing newline to submit a command.
     text: String,
+}
+
+/// Shape a serialisable payload into a tool result's `structuredContent`.
+///
+/// The one seam every structured answer passes through, so "this is how a tool
+/// answers" is stated once rather than restated at each tool.
+fn structured<T: Serialize>(payload: T) -> Result<CallToolResult, ErrorData> {
+    let value = serde_json::to_value(payload)
+        .map_err(|error| ErrorData::internal_error(error.to_string(), None))?;
+    Ok(CallToolResult::structured(value))
 }
 
 /// A screenshot that produced no image, as a *tool-level* error: the caller
