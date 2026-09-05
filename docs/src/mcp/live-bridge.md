@@ -20,10 +20,9 @@ session is torn down.
 | `read_terminal` | `session`, `lines` | `{ text, rendered }` |
 | `screenshot` | `max_width` | the window as a PNG |
 
-Every one of these answers a JSON **object** — `list_sessions` puts its rows in
-a `sessions` field rather than answering the array itself, because MCP requires
-`structuredContent` to be an object and a client rejects anything else on its
-schema check.
+Every tool answers a JSON **object**: MCP clients reject anything else on their
+schema check, which is why `list_sessions` puts its rows in a `sessions` field
+rather than answering the array itself.
 
 **`snapshot` is light by default**: structure only, no terminal text. Scope
 text to named handles with `terminals`, or pass `sections` (any of `"config"`,
