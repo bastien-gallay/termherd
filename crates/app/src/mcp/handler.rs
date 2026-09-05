@@ -105,8 +105,8 @@ impl TermherdMcp {
                 None,
             ));
         };
-        let rows: Vec<SessionDto> = sessions.iter().map(SessionDto::from).collect();
-        structured(rows)
+        let sessions = sessions.iter().map(SessionDto::from).collect();
+        structured(SessionListDto { sessions })
     }
 
     /// A filterable, read-only snapshot of the whole workspace — the structured
@@ -651,6 +651,16 @@ impl ServerHandler for TermherdMcp {
     }
 }
 
+/// The `list_sessions` answer. The rows ride in a field rather than as the
+/// payload itself because MCP requires `structuredContent` to be a JSON object:
+/// a bare array is rejected by the client's schema check, before the caller
+/// sees a byte. The envelope is also where a later count or truncation marker
+/// goes, which an array has nowhere to put.
+#[derive(Serialize)]
+struct SessionListDto {
+    sessions: Vec<SessionDto>,
+}
+
 /// The on-the-wire shape of a session for the `list_sessions` tool: the stable
 /// external handle plus flat, string-typed fields an MCP client can read without
 /// knowing termherd's internal enums.
@@ -814,10 +824,21 @@ struct RunArgs {
 /// Shape a serialisable payload into a tool result's `structuredContent`.
 ///
 /// The one seam every structured answer passes through, so "this is how a tool
-/// answers" is stated once rather than restated at each tool.
+/// answers" is stated once rather than restated at each tool — and so the rule
+/// that shape must obey is enforced rather than remembered: MCP requires an
+/// object, and a client rejects an array or a scalar on its schema check before
+/// the caller sees a byte. A payload that is not an object is a programming
+/// error here, not a caller's, so it surfaces as an internal error naming the
+/// rule.
 fn structured<T: Serialize>(payload: T) -> Result<CallToolResult, ErrorData> {
     let value = serde_json::to_value(payload)
         .map_err(|error| ErrorData::internal_error(error.to_string(), None))?;
+    if !value.is_object() {
+        return Err(ErrorData::internal_error(
+            "structuredContent must be a JSON object; wrap this payload in one",
+            None,
+        ));
+    }
     Ok(CallToolResult::structured(value))
 }
 
