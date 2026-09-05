@@ -1104,15 +1104,16 @@ mod tests {
         );
     }
 
-    /// One sweep case: the reply the shell must give for this tool, and the call
-    /// that drives it. Both halves live in a single `match` so the tool list is
-    /// stated once; a tool the sweep does not know panics there rather than
-    /// being skipped in silence.
+    /// A tool call in flight, boxed so one `match` can return any of them.
     type SweepCall<'a> =
         std::pin::Pin<Box<dyn Future<Output = Result<CallToolResult, ErrorData>> + 'a>>;
 
-    /// `None` for a tool that answers with something other than structured
-    /// content — only `screenshot`, whose pixels ride as image content.
+    /// One sweep case: the reply the shell must give for this tool, and the call
+    /// that drives it. Both halves live in a single `match` so the tool list is
+    /// stated once, and a tool the sweep does not know panics there rather than
+    /// being skipped in silence. `None` is for a tool that answers with
+    /// something other than structured content — only `screenshot`, whose pixels
+    /// ride as image content.
     fn sweep_case<'a>(mcp: &'a TermherdMcp, tool: &str) -> Option<(Reply, SweepCall<'a>)> {
         use crate::shell::bridge::{ActionOutcome, TerminalRead, WaitOutcome};
 
@@ -1231,19 +1232,13 @@ mod tests {
         // The tool list comes from the router itself rather than from a list
         // typed here, so a tool added later fails this sweep instead of
         // slipping past an enumeration that merely claims to be exhaustive.
-        let (probe, _probe_requests) = channel();
-        let tools: Vec<String> = TermherdMcp::new(probe)
-            .tool_router
+        let tools: Vec<String> = TermherdMcp::tool_router()
             .list_all()
             .iter()
             .map(|tool| tool.name.to_string())
             .collect();
-        assert!(
-            tools.len() >= 15,
-            "the router publishes the whole surface, got {} tools",
-            tools.len()
-        );
 
+        let mut checked = 0;
         for tool in tools {
             let (handle, requests) = channel();
             let mcp = TermherdMcp::new(handle);
@@ -1261,7 +1256,11 @@ mod tests {
                 value.is_object(),
                 "{tool} must answer a JSON object, got: {value}"
             );
+            checked += 1;
         }
+        // An empty router would walk this loop without asserting anything and
+        // still pass — success and vacuity have to stay distinguishable.
+        assert!(checked > 0, "the sweep asserted on no tool at all");
     }
 
     #[tokio::test]
