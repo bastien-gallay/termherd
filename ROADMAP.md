@@ -87,6 +87,8 @@ issues #18–#29.
 | [F-mcp-attach](#f-mcp-attach) | feature | mcp, workspace | ☐ | The attach rung: reach the live bridge from outside a spawned session. |
 | [F-mcp-control-surface](#f-mcp-control-surface) | feature | mcp | ☐ | Termherd exposes its own control and orchestration surface as an MCP server. |
 | [F-mcp-ide-bridge](#f-mcp-ide-bridge) | feature | mcp | ☐ | A live MCP/IDE bridge to Claude — termherd as the client, not the server. |
+| [F-mcp-pointer-chrome](#f-mcp-pointer-chrome) | feature | mcp, workspace | ☐ | The pointer rung, chrome half: click and drag termherd's own interface. |
+| [F-mcp-pointer-terminal](#f-mcp-pointer-terminal) | feature | mcp, terminal | ☐ | The pointer rung, terminal half: place a mouse event inside a session. |
 | [F-multi-window](#f-multi-window) | feature | workspace | ☐ | More than one termherd window, and tabs that travel between them. |
 | [F-repo-prune](#f-repo-prune) | feature | sidebar | ☐ | Sweep the sidebar for projects whose directory no longer exists. |
 | [F-repo-remove](#f-repo-remove) | feature | sidebar | ☐ | Take a project or repository out of the sidebar, durably and explicitly. |
@@ -903,6 +905,10 @@ shippable:
   capture dump is now the MCP snapshot.
 - [ ] [F-mcp-attach](#f-mcp-attach) — The attach rung: reach the live bridge
   from outside, not only from a session it spawned.
+- [ ] [F-mcp-pointer-terminal](#f-mcp-pointer-terminal) — The pointer rung,
+  terminal half: a mouse event inside a session. Blocks #155.
+- [ ] [F-mcp-pointer-chrome](#f-mcp-pointer-chrome) — The pointer rung, chrome
+  half: click and drag termherd's own interface.
 
 <a id="f-mcp-ide-bridge"></a>
 
@@ -912,6 +918,76 @@ A live MCP/IDE bridge to Claude — termherd as the client, not the server.
 
 Live MCP/IDE bridge to Claude (moved from Unsure, PRD rev. 6); decoupled from
 the still-Unsure diff panel
+
+<a id="f-mcp-pointer-chrome"></a>
+
+### F-mcp-pointer-chrome
+
+The pointer rung, chrome half: click and drag termherd's own interface.
+
+The pointer rung, chrome half: click and drag termherd's **own** interface —
+sidebar rows, the tab strip, split gutters — the way `press_keys` presses its
+own keyboard. Filed as #301, `needs-design`.
+
+A set of affordances exists only under the mouse, so no agent can reach or
+regression-test any of them: drag a split gutter (#55), drag a tab to another
+window (#153) or out to detach it (#154), auto-scroll a drag-selection at the
+edge (#157), alt+drag for column selection (#159), Cmd/Ctrl-click a hyperlink
+(#84). The argument that produced [F-mcp-keys](#f-mcp-keys) — a surface an
+agent cannot reach is a surface an agent cannot regression-test — applies
+unchanged to the pointer, with a larger uncovered surface behind it.
+
+Pixel addressed, because the chrome is not a grid: `mouse_at_app(kind, x, y,
+…)` in the same frame `screenshot` returns, so the loop is *see the pixels,
+click the pixels* with no third coordinate system to reconcile. The answer
+names what the click reached and the resulting focus, and an open overlay eats
+a click as it eats a chord.
+
+Open design questions, which is why it stays design-first: whether a drag is
+one call carrying a path or a press / move / release sequence — the drag-heavy
+tickets above should settle it — and how it reconciles with the keyboard rung's
+invariant that neither tool may reach a state the keyboard cannot, since a
+gutter drag is exactly such a state.
+
+Landing it falsifies several claims written while no MCP caller had a pointer:
+the "which is every MCP caller" premise on `escape` in `shell/routing.rs` and
+its sweep in `shell.rs`, "Mouse-only, which is no one, over MCP" in
+[F-mcp-keys](#f-mcp-keys), and "Two tools reach TermHerd's own interface" in
+the manual's keyboard page.
+
+Sibling of [F-mcp-pointer-terminal](#f-mcp-pointer-terminal), which is the half
+that blocks #155.
+
+<a id="f-mcp-pointer-terminal"></a>
+
+### F-mcp-pointer-terminal
+
+The pointer rung, terminal half: place a mouse event inside a session.
+
+The pointer rung, terminal half: place a mouse event **inside a session's
+terminal**, the way `run_in_session` places text there. Filed as #300. Cell
+addressed — a terminal is a grid, and a grid is what an SGR report carries — so
+the tool is `mouse_in_session(session, kind, col, row, …)`, bounded by the
+pane's geometry, answering what the pane did with it (`forwarded` when the
+child had mouse reporting on, `selection` when it drove local text selection,
+`rejected` out of bounds).
+
+Two gaps close with it. The act→wait→observe loop has no pointer at all, so
+every mouse-mode TUI a session hosts — Claude Code's `/diff` and `/resume`,
+lazygit, fzf, vim — is unreachable to an agent whose keyboard already works.
+And #155 (mouse clicks are never encoded to the child) cannot be verified by
+the agent that fixes it: its whole contract is a pointer gesture, and no test
+in the tree can produce one. **Blocks #155.**
+
+It shares one seam with that bug and should not be built twice: this rung
+introduces the pointer *event path* (a `core::Event` carrying cell coordinates
+and button state, through the shell to the focused pane) and exposes it over
+MCP, while #155 introduces the SGR encoder in `pty` and the mode gate that
+chooses between forwarding and local selection. Local selection is the
+observable behaviour before #155 lands, so the rung has a test standing alone.
+
+Sibling of [F-mcp-pointer-chrome](#f-mcp-pointer-chrome), which drives
+termherd's own interface rather than a terminal and blocks nothing.
 
 <a id="f-multi-window"></a>
 
