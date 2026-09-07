@@ -30,7 +30,7 @@ split + `Sessions` registry + `Sidebar`/`FontState` field-flatten, A1–A4 —
 `F-antigravity-sessions` #160/#161 build on), #171 (F, json_store —
 **shipped**) and #172 (pty →
 `input`/`grid`/`events`/`status`/`session`/`kill`/`manager` — **shipped**, the
-seam #143 foreground-process detection and #155 vim mouse build on).
+seam #143 foreground-process detection and #155 mouse buttons build on).
 Cognitive-complexity (signal C) stays unfiled. **Report-only** (was blocked on
 a quality-report home): file length (signal A) now ships **inside #173's gate**
 as a job-summary report; churn×size hotspots (signal J) stays unfiled. Dropped:
