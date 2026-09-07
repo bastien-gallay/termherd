@@ -323,9 +323,10 @@ purpose*, not by accident.
 - **Both rules — no paraphrase, and extract rather than annotate — govern doc
   comments too.** A doc comment is not the place the restraint lapses: after
   the summary line, only a constraint the signature cannot state earns its
-  place — not the design's argument for itself, not the bug that motivated it.
-  Same for a test, where the name states the intent and a comment restating the
-  assertions goes.
+  place — not the design's argument for itself, not the bug that motivated it;
+  that history belongs in the commit and the PR, dated and searchable where a
+  doc comment only rots. Same for a test, where the name states the intent and
+  a comment restating the assertions goes.
 
 ```rust
 /// Drives one terminal session: spawn, write, resize, kill.
