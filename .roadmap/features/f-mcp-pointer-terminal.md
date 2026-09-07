@@ -27,8 +27,9 @@ a TUI actually responds. **Blocks #155.**
 
 It shares one seam with that bug, and neither half is greenfield — the risk is
 a second copy, not a missing one. A cell-addressed pointer path already reaches
-`core` (`Event::Wheel` carries a pointer cell, `SelectOp` carries grid
-coordinates), and `pty::input::wheel_bytes` already holds both the SGR/X10
+`core` (`Event::ScrollViewport` carries a `ScrollTarget::Wheel` with a pointer
+cell, `SelectOp` carries grid coordinates), and `pty::input::wheel_bytes`
+already holds both the SGR/X10
 encoder and the mode gate that chooses between forwarding and local selection.
 So this rung *extends* that path with button state and exposes it over MCP,
 while #155 *extends* that same encoder and gate to press, release and drag.
