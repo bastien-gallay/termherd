@@ -86,7 +86,7 @@ The action catalogue is published by the [stdio server](./stdio.md) at
 `termherd://keys/schema`; the live bridge serves tools only, so its `run_action`
 error message carries the syntax instead.
 
-## Example: verify a gesture end to end
+## Example: verify a keyboard gesture end to end
 
 ```text
 run_action(["split-vertical"])        → { steps: [{ outcome: "ran",
