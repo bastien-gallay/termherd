@@ -304,7 +304,9 @@ purpose*, not by accident.
   with a comment per arm is the tell — hoist each arm into a named
   predicate/handler and let the names carry the *what*: e.g. a modal key-routing
   ladder reads best as a linear dispatch over named overlay handlers, not a
-  stack of commented blocks.
+  stack of commented blocks. The same move answers an explanation that keeps
+  growing: split the function so its halves are named, or hoist the invariant
+  into a type or a guard that enforces it.
 - Write an inline comment only when the *why* is non-obvious **and
   non-recoverable from the code**: a hidden constraint, a surprising invariant,
   a platform quirk, a workaround for a specific bug (e.g. the `ESC[6n` responder
@@ -318,18 +320,13 @@ purpose*, not by accident.
   sanctioned code, `FRn`, is defined in [`AGENTS.md`](AGENTS.md) conventions).
 - Every public item has a doc comment: a one-line summary, then details and
   examples, using intra-doc links.
-- **A doc comment is a contract, not an essay.** The summary line names what
-  the item is for; anything after it earns its place by stating a constraint
-  the signature cannot — never by paraphrasing the body, re-arguing the design,
-  or retelling the bug that motivated it. That history belongs in the commit
-  and the PR, which are dated and searchable where a doc comment only rots.
-- **Prefer the refactor to the paragraph.** When an explanation is getting
-  long, the code is usually the thing to change: split the function so its
-  halves are named, hoist the invariant into a type or a guard that enforces
-  it, or turn the rule into a predicate other code calls. A rule expressed in
-  prose is unchecked; the same rule expressed in code fails the build.
-- The same economy applies in tests: the test name states the intent, so a
-  comment above it that restates the assertion goes.
+- **Both rules — no paraphrase, and extract rather than annotate — govern doc
+  comments too.** A doc comment is not the place the restraint lapses: after
+  the summary line, only a constraint the signature cannot state earns its
+  place — not the design's argument for itself, not the bug that motivated it;
+  that history belongs in the commit and the PR, dated and searchable where a
+  doc comment only rots. Same for a test, where the name states the intent and
+  a comment restating the assertions goes.
 
 ```rust
 /// Drives one terminal session: spawn, write, resize, kill.
